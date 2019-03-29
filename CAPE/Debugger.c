@@ -1035,9 +1035,7 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
         }
 
         if (TrapIndex)
-        {
             DoOutputDebugString("CAPEExceptionFilter: Anomaly detected: Trap index set on non-single-step: %d\n", TrapIndex);
-        }
 
 #ifdef CAPE_TRACE
         if (!TraceRunning)
@@ -1186,12 +1184,13 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
             return EXCEPTION_CONTINUE_SEARCH;
         }
     }
-    //else if (ExceptionInfo->ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
-    //{
-    //    // This could be useful output
-    //    // TODO: find string buffer(s) and send info to DoOutputDebugString
-    //    return EXCEPTION_CONTINUE_SEARCH;
-    //}
+    else if (ExceptionInfo->ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
+    {
+        // This could be useful output
+        // TODO: find string buffer(s) and send info to DoOutputDebugString
+        DoOutputDebugString("CAPEExceptionFilter: DBG_PRINTEXCEPTION_C at 0x%x (0x%x).\n", ExceptionInfo->ExceptionRecord->ExceptionInformation[1], ExceptionInfo->ExceptionRecord->ExceptionInformation[0]);
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     else if (!VECTORED_HANDLER && OriginalExceptionHandler)
     {
         if ((ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress >= g_our_dll_base && (ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress < (g_our_dll_base + g_our_dll_size))
@@ -1232,14 +1231,15 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
 }
 
 //**************************************************************************************
-BOOL ContextSetDebugRegister
+BOOL ContextSetDebugRegisterEx
 //**************************************************************************************
 (
     PCONTEXT	Context,
     int		    Register,
     int		    Size,
     LPVOID	    Address,
-    DWORD	    Type
+    DWORD	    Type,
+    BOOL        NoSetThreadContext
 )
 {
 	DWORD	Length;
@@ -1276,11 +1276,6 @@ BOOL ContextSetDebugRegister
         DoOutputDebugString("ContextSetDebugRegister: %d is an invalid Size, must be 1, 2, 4 or 8.\n", Size);
         return FALSE;
     }
-
-#ifdef CAPE_TRACE
-    if (!TraceRunning)
-#endif
-	DoOutputDebugString("ContextSetDebugRegister: Setting breakpoint %i within Context, Size=0x%x, Address=0x%p and Type=0x%x.\n", Register, Size, Address, Type);
 
     Length  = LengthMask[Size];
 
@@ -1326,6 +1321,9 @@ BOOL ContextSetDebugRegister
     Context->Dr6 = 0;
 
 #ifdef _WIN64
+    if (NoSetThreadContext)
+        return TRUE;
+
     CurrentThreadBreakpoint = GetThreadBreakpoints(GetCurrentThreadId());
 
 	if (CurrentThreadBreakpoint == NULL)
@@ -1347,11 +1345,23 @@ BOOL ContextSetDebugRegister
         DoOutputErrorString("ContextSetDebugRegister: SetThreadContext failed");
         return FALSE;
     }
-    else
-        DoOutputDebugString("ContextSetDebugRegister: SetThreadContext success.\n");
 #endif
 
 	return TRUE;
+}
+
+//**************************************************************************************
+BOOL ContextSetDebugRegister
+//**************************************************************************************
+(
+    PCONTEXT	Context,
+    int		    Register,
+    int		    Size,
+    LPVOID	    Address,
+    DWORD	    Type
+)
+{
+    return ContextSetDebugRegisterEx(Context, Register, Size, Address, Type, FALSE);
 }
 
 //**************************************************************************************
@@ -2162,7 +2172,7 @@ BOOL ContextSetBreakpoint(PTHREADBREAKPOINTS ReferenceThreadBreakpoint)
 
 
 //**************************************************************************************
-BOOL ContextSetThreadBreakpoint
+BOOL ContextSetThreadBreakpointEx
 //**************************************************************************************
 (
     PCONTEXT	Context,
@@ -2170,7 +2180,8 @@ BOOL ContextSetThreadBreakpoint
     int			Size,
     LPVOID		Address,
     DWORD		Type,
-	PVOID		Callback
+	PVOID		Callback,
+    BOOL        NoSetThreadContext
 )
 {
 	PTHREADBREAKPOINTS CurrentThreadBreakpoint;
@@ -2181,7 +2192,7 @@ BOOL ContextSetThreadBreakpoint
         return FALSE;
     }
 
-    if (!ContextSetDebugRegister(Context, Register, Size, Address, Type))
+    if (!ContextSetDebugRegisterEx(Context, Register, Size, Address, Type, NoSetThreadContext))
 	{
 		DoOutputDebugString("ContextSetThreadBreakpoint: Call to ContextSetDebugRegister failed.\n");
 	}
@@ -2203,23 +2214,23 @@ BOOL ContextSetThreadBreakpoint
 		CurrentThreadBreakpoint->BreakpointInfo[Register].Callback      = Callback;
 	}
 
-#ifdef _WIN64
-	if (CurrentThreadBreakpoint->ThreadHandle == NULL)
-	{
-		DoOutputDebugString("ContextSetThreadBreakpoint: No thread handle found in breakpoints found for current thread %d.\n", GetCurrentThreadId());
-		return FALSE;
-	}
-
-    Context->ContextFlags = CONTEXT_DEBUG_REGISTERS;
-
-    if (!SetThreadContext(CurrentThreadBreakpoint->ThreadHandle, Context))
-    {
-        DoOutputErrorString("ContextSetThreadBreakpoint: SetThreadContext failed");
-        return FALSE;
-    }
-#endif
 
     return TRUE;
+}
+
+//**************************************************************************************
+BOOL ContextSetThreadBreakpoint
+//**************************************************************************************
+(
+    PCONTEXT	Context,
+    int			Register,
+    int			Size,
+    LPVOID		Address,
+    DWORD		Type,
+	PVOID		Callback
+)
+{
+    return ContextSetThreadBreakpointEx(Context, Register, Size, Address, Type,  Callback, FALSE);
 }
 
 //**************************************************************************************
@@ -2358,6 +2369,38 @@ BOOL ContextClearCurrentBreakpoint
     }
 
     return FALSE;
+}
+
+//**************************************************************************************
+BOOL ContextSetThreadBreakpointsEx(PCONTEXT ThreadContext, PTHREADBREAKPOINTS ThreadBreakpoints, BOOL NoSetThreadContext)
+//**************************************************************************************
+{
+    if (!ThreadContext)
+        return FALSE;
+
+    for (unsigned int Register = 0; Register < NUMBER_OF_DEBUG_REGISTERS; Register++)
+    {
+        if (!ContextSetThreadBreakpointEx
+        (
+            ThreadContext,
+            ThreadBreakpoints->BreakpointInfo[Register].Register,
+            ThreadBreakpoints->BreakpointInfo[Register].Size,
+            ThreadBreakpoints->BreakpointInfo[Register].Address,
+            ThreadBreakpoints->BreakpointInfo[Register].Type,
+            ThreadBreakpoints->BreakpointInfo[Register].Callback,
+            NoSetThreadContext
+        ))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+//**************************************************************************************
+BOOL ContextSetThreadBreakpoints(PCONTEXT ThreadContext, PTHREADBREAKPOINTS ThreadBreakpoints)
+//**************************************************************************************
+{
+    return ContextSetThreadBreakpointsEx(ThreadContext, ThreadBreakpoints, FALSE);
 }
 
 //**************************************************************************************
@@ -3276,5 +3319,21 @@ int launch_debugger()
         DebuggerInitialised = InitialiseDebugger();
 
         return DebuggerInitialised;
+    }
+}
+
+void NtContinueHandler(PCONTEXT ThreadContext)
+{
+    if (!ThreadContext->Dr0 && !ThreadContext->Dr1 && !ThreadContext->Dr2 && !ThreadContext->Dr3)
+    {
+        DWORD ThreadId = GetCurrentThreadId();
+        if (ThreadId == MainThreadId)
+        {
+            PTHREADBREAKPOINTS ThreadBreakpoints = GetThreadBreakpoints(ThreadId);
+            if (ThreadBreakpoints) {
+                DoOutputDebugString("NtContinue hook: restoring breakpoints for thread %d.\n", ThreadId);
+                ContextSetThreadBreakpointsEx(ThreadContext, ThreadBreakpoints, TRUE);
+            }
+        }
     }
 }

@@ -100,8 +100,8 @@ extern "C" {
 BOOL DebuggerInitialised;
 
 // Global variables for submission options
-void *CAPE_var1, *CAPE_var2, *CAPE_var3, *CAPE_var4;
 PVOID bp0, bp1, bp2, bp3;
+PVOID bpw0, bpw1, bpw2, bpw3;
 
 LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo);
 PVOID CAPEExceptionFilterHandle;
@@ -110,7 +110,7 @@ PEXCEPTION_ROUTINE SEH_TopLevelHandler;
 LPTOP_LEVEL_EXCEPTION_FILTER OriginalExceptionHandler;
 BOOL VECTORED_HANDLER;
 BOOL GuardPagesDisabled;
-
+BOOL DisableSetThreadContext;
 DWORD ChildProcessId;
 DWORD ChildThreadId;
 DWORD_PTR DebuggerEP;
@@ -123,7 +123,10 @@ BOOL SetBreakpoint(int Register, int Size, LPVOID Address, DWORD Type, PVOID Cal
 BOOL SetThreadBreakpoint(DWORD ThreadId, int Register, int Size, LPVOID Address, DWORD Type, PVOID Callback);
 BOOL ContextSetThreadBreakpoint(PCONTEXT Context, int Register, int Size, LPVOID Address, DWORD Type, PVOID Callback);
 BOOL ContextSetDebugRegister(PCONTEXT Context, int Register, int Size, LPVOID Address, DWORD Type);
+BOOL ContextSetDebugRegisterEx(PCONTEXT Context, int Register, int Size, LPVOID Address, DWORD Type, BOOL NoSetThreadContext);
 BOOL SetThreadBreakpoints(PTHREADBREAKPOINTS ThreadBreakpoints);
+BOOL ContextSetThreadBreakpoints(PCONTEXT ThreadContext, PTHREADBREAKPOINTS ThreadBreakpoints);
+BOOL ContextSetThreadBreakpointsEx(PCONTEXT ThreadContext, PTHREADBREAKPOINTS ThreadBreakpoints, BOOL NoSetThreadContext);
 BOOL ContextSetBreakpoint(PTHREADBREAKPOINTS ThreadBreakpoints);
 BOOL ContextUpdateCurrentBreakpoint(PCONTEXT Context, int Size, LPVOID Address, DWORD Type, PVOID Callback);
 BOOL SetNextAvailableBreakpoint(DWORD ThreadId, unsigned int* Register, int Size, LPVOID Address, DWORD Type, PVOID Callback);

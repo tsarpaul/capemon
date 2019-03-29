@@ -44,6 +44,7 @@ extern LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo
 extern ULONG_PTR base_of_dll_of_interest;
 #ifdef CAPE_TRACE
 extern BOOL SetInitialBreakpoints(PVOID ImageBase);
+extern BOOL BreakpointsSet;
 #endif
 
 void disable_tail_call_optimization(void)
@@ -371,6 +372,7 @@ static hook_t g_hooks[] = {
     HOOK(ntdll, NtSetInformationThread),
     HOOK(ntdll, NtQueryInformationThread),
     HOOK(ntdll, NtYieldExecution),
+    HOOK(ntdll, NtContinue),
 
 	//
     // Misc Hooks
@@ -381,6 +383,7 @@ static hook_t g_hooks[] = {
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
 
+	HOOK(user32, ChangeWindowMessageFilter),
 	// for debugging only
 	//HOOK(kernel32, GetLastError),
 

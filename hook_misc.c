@@ -62,7 +62,7 @@ HOOKDEF(HHOOK, WINAPI, SetWindowsHookExW,
 ) {
 
 	HHOOK ret;
-	
+
 	if (hMod && lpfn && dwThreadId) {
 		DWORD pid = get_pid_by_tid(dwThreadId);
 		if (pid && pid != GetCurrentProcessId())
@@ -172,7 +172,7 @@ HOOKDEF(NTSTATUS, WINAPI, LdrGetProcedureAddress,
 	if (FunctionName != NULL && FunctionName->Length == 13 && FunctionName->Buffer != NULL &&
 		(!strncmp(FunctionName->Buffer, "EncodePointer", 13) || !strncmp(FunctionName->Buffer, "DecodePointer", 13)))
 		return ret;
-    
+
     LOQ_ntstatus("system", "opSiP", "ModuleName", get_basename_of_module(ModuleHandle), "ModuleHandle", ModuleHandle,
         "FunctionName", FunctionName != NULL ? FunctionName->Length : 0,
             FunctionName != NULL ? FunctionName->Buffer : NULL,
@@ -199,7 +199,7 @@ HOOKDEF(BOOL, WINAPI, DeviceIoControl,
 ) {
 	BOOL ret;
 	ENSURE_DWORD(lpBytesReturned);
-	
+
 	ret = Old_DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer,
 		nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned,
 		lpOverlapped);
@@ -842,7 +842,7 @@ HOOKDEF(HDEVINFO, WINAPI, SetupDiGetClassDevsW,
 			LOQ_handle("misc", "ss", "ClassGuid", idbuf, "Known", known);
 		else
 			LOQ_handle("misc", "s", "ClassGuid", idbuf);
-            
+
         set_lasterrors(&lasterror);
 	}
 	return ret;
@@ -1097,15 +1097,15 @@ HOOKDEF(void, WINAPIV, memcpy,
    void *dest,
    const void *src,
    size_t count
-) 
+)
 {
 	int ret = 0;	// needed for LOQ_void
 
 	Old_memcpy(dest, src, count);
-	
+
     if (count > 0xa00)
         LOQ_void("misc", "bppi", "DestinationBuffer", count, dest, "source", src, "destination", dest, "count", count);
-	
+
 	return;
 }
 
@@ -1473,4 +1473,24 @@ HOOKDEF(VOID, WINAPI, LocalFree,
 	int ret = 0;
 	Old_LocalFree(hMem);
 	LOQ_void("misc", "p", "SourceBuffer", hMem);
+}
+
+#define MSGFLT_ADD 1
+#define MSGFLT_REMOVE 2
+HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+  UINT  message,
+  DWORD dwFlag
+)
+{
+	BOOL ret;
+    ret = Old_ChangeWindowMessageFilter(message, dwFlag);
+    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD)
+    {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        DoOutputDebugString("ChangeWindowMessageFilter hook: dwFlag: %d, ret %d, GetLastError 0x%x.\n", dwFlag, ret, GetLastError());
+        ret = FALSE;
+    }
+	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return ret;
 }

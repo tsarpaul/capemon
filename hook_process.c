@@ -774,17 +774,17 @@ HOOKDEF(NTSTATUS, WINAPI, NtProtectVirtualMemory,
     PTRACKEDREGION TrackedRegion;
 #endif
 
-	if (NewAccessProtection == PAGE_EXECUTE_READWRITE && BaseAddress && NumberOfBytesToProtect &&
-		GetCurrentProcessId() == our_getprocessid(ProcessHandle) && is_in_dll_range((ULONG_PTR)*BaseAddress)) {
-		unsigned int offset;
-		char *dllname = convert_address_to_dll_name_and_offset((ULONG_PTR)*BaseAddress, &offset);
-		if (dllname && !strcmp(dllname, "ntdll.dll")) {
-			// don't allow writes, this will cause memory access violations
-			// that we are going to handle in the RtlDispatchException hook
-			NewAccessProtection = PAGE_EXECUTE_READ;
-		}
-		if (dllname) free(dllname);
-	}
+//	if (NewAccessProtection == PAGE_EXECUTE_READWRITE && BaseAddress && NumberOfBytesToProtect &&
+//		GetCurrentProcessId() == our_getprocessid(ProcessHandle) && is_in_dll_range((ULONG_PTR)*BaseAddress)) {
+//		unsigned int offset;
+//		char *dllname = convert_address_to_dll_name_and_offset((ULONG_PTR)*BaseAddress, &offset);
+//		if (dllname && !strcmp(dllname, "ntdll.dll")) {
+//			// don't allow writes, this will cause memory access violations
+//			// that we are going to handle in the RtlDispatchException hook
+//			NewAccessProtection = PAGE_EXECUTE_READ;
+//		}
+//		if (dllname) free(dllname);
+//	}
 
 	if (NewAccessProtection == PAGE_EXECUTE_READ && BaseAddress && NumberOfBytesToProtect &&
 		GetCurrentProcessId() == our_getprocessid(ProcessHandle) && is_in_dll_range((ULONG_PTR)*BaseAddress))
@@ -1001,7 +1001,14 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 		}
 	}
 #endif
+    //struct _EXCEPTION_POINTERS ExceptionInfo;
+    //ExceptionInfo.ExceptionRecord = ExceptionRecord;
+    //cuckoomon_exception_handler(&ExceptionInfo);
 
+    if (ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
+        DoOutputDebugString("RtlDispatchException hook: DBG_PRINTEXCEPTION_C: %.08Ix, Exception Code: %08x.\n", ExceptionRecord->ExceptionInformation[1], ExceptionRecord->ExceptionCode);
+    else if (ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP)
+        DoOutputDebugString("RtlDispatchException hook: Fault Address: %.08Ix, Exception Code: %08x.\n", ExceptionRecord->ExceptionInformation[1], ExceptionRecord->ExceptionCode);
 	// flush logs prior to handling of an exception without having to register a vectored exception handler
 	log_flush();
 

@@ -3025,7 +3025,17 @@ extern HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
     IN const DVTARGETDEVICE *ptd
 );
 
-HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
+extern HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
   LPCWSTR   lpFileName,
   PVOID     *pUsers
+);
+
+extern HOOKDEF(NTSTATUS, WINAPI, NtContinue,
+  IN PCONTEXT ThreadContext,
+  IN BOOLEAN  RaiseAlert
+);
+
+extern HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+  UINT  message,
+  DWORD dwFlag
 );

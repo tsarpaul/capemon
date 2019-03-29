@@ -32,7 +32,7 @@ struct _g_config {
 
 	// results directory, has to be hidden
 	wchar_t w_results[MAX_PATH];
-	
+
 	// analyzer directory, has to be hidden
     char analyzer[MAX_PATH];
 
@@ -44,7 +44,7 @@ struct _g_config {
 
 	// file of interest
 	wchar_t *file_of_interest;
-	
+
 	// URL of interest
 	wchar_t *url_of_interest;
 
@@ -118,6 +118,10 @@ struct _g_config {
     int terminate_processes;
 
     char break_on_return[MAX_PATH];
+
+    int trace_all;
+
+    char *trace_into_api[EXCLUSION_MAX];
 };
 
 extern struct _g_config g_config;

@@ -34,6 +34,15 @@ extern void GetThreadContextHandler(DWORD Pid, LPCONTEXT Context);
 extern void SetThreadContextHandler(DWORD Pid, const CONTEXT *Context);
 extern void ResumeThreadHandler(DWORD Pid);
 #endif
+#ifdef CAPE_TRACE
+//extern PTHREADBREAKPOINTS GetThreadBreakpoints(DWORD ThreadId);
+//extern BOOL ContextSetThreadBreakpoints(PCONTEXT ThreadContext, PTHREADBREAKPOINTS ThreadBreakpoints);
+//extern BOOL ContextSetDebugRegister(PCONTEXT Context, int Register, int Size, LPVOID Address, DWORD Type);
+//extern BOOL ContextCheckDebugRegisters(PCONTEXT Context);
+//extern PVOID bp0, bp1, bp2, bp3;
+extern void NtContinueHandler(PCONTEXT ThreadContext);
+unsigned int TestFlag = 0;
+#endif
 
 static lookup_t g_ignored_threads;
 
@@ -564,5 +573,18 @@ HOOKDEF(NTSTATUS, WINAPI, NtYieldExecution,
 	NTSTATUS ret = 0;
     LOQ_void("threading", "");
     ret = Old_NtYieldExecution();
+    return ret;
+}
+
+HOOKDEF(NTSTATUS, WINAPI, NtContinue,
+    IN PCONTEXT ThreadContext,
+    IN BOOLEAN  RaiseAlert
+)
+{
+	NTSTATUS ret = 0;
+#ifdef CAPE_TRACE
+    NtContinueHandler(ThreadContext);
+#endif
+    ret = Old_NtContinue(ThreadContext, RaiseAlert);
     return ret;
 }

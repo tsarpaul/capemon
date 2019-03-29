@@ -51,7 +51,7 @@ extern BOOL BreakpointsSet;
 
 void hook_init()
 {
-    lookup_init(&g_hook_info);
+    lookup_init_no_cs(&g_hook_info);
     lookup_init(&g_caller_regions);
 }
 
@@ -68,11 +68,11 @@ static int set_caller_info(void *unused, ULONG_PTR addr)
 	hook_info_t *hookinfo = hook_info();
 
 	if (!is_in_dll_range(addr)) {
-        PVOID AllocationBase = GetAllocationBase((PVOID)addr);
-        if (AllocationBase && !lookup_get(&g_caller_regions, (ULONG_PTR)AllocationBase, 0)) {
-            DoOutputDebugString("set_caller_info: Adding region at 0x%p to caller regions list.\n", AllocationBase);
-            lookup_add(&g_caller_regions, (ULONG_PTR)AllocationBase, 0);
-        }
+        //PVOID AllocationBase = GetAllocationBase((PVOID)addr);
+        //if (AllocationBase && !lookup_get(&g_caller_regions, (ULONG_PTR)AllocationBase, 0)) {
+        //    DoOutputDebugString("set_caller_info: Adding region at 0x%p to caller regions list.\n", AllocationBase);
+        //    lookup_add(&g_caller_regions, (ULONG_PTR)AllocationBase, 0);
+        //}
 		if (hookinfo->main_caller_retaddr == 0)
 			hookinfo->main_caller_retaddr = addr;
 		else {
@@ -195,11 +195,12 @@ void break_on_return(hook_t *h)
         return;
     if (!called_by_hook() && !stricmp(h->funcname, g_config.break_on_return)) {
         DoOutputDebugString("Break-on-return: %s call detected in thread %d.\n", g_config.break_on_return, GetCurrentThreadId());
-        BOOL BreakpointsSet = BreakpointOnReturn((PVOID)hookinfo->return_address);
-        if (BreakpointsSet)
-            DoOutputDebugString("Break-on-return: Breakpoint set on return from %s.\n", g_config.break_on_return);
+        if (hookinfo->main_caller_retaddr)
+            BreakpointOnReturn((PVOID)hookinfo->main_caller_retaddr);
+        else if (hookinfo->parent_caller_retaddr)
+            BreakpointOnReturn((PVOID)hookinfo->parent_caller_retaddr);
         else
-            DoOutputDebugString("Break-on-return: Breakpoint set on return from %s.\n", g_config.break_on_return);
+            BreakpointOnReturn((PVOID)hookinfo->return_address);
     }
 
 	return;
