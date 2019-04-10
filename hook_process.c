@@ -31,7 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "CAPE\Debugger.h"
 #endif
 
-extern int addr_in_trampoline(ULONG_PTR addr);
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern void DoOutputErrorString(_In_ LPCTSTR lpOutputString, ...);
 
@@ -1003,9 +1002,6 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 		}
 	}
 #endif
-    //struct _EXCEPTION_POINTERS ExceptionInfo;
-    //ExceptionInfo.ExceptionRecord = ExceptionRecord;
-    //cuckoomon_exception_handler(&ExceptionInfo);
 
     if (ExceptionRecord->ExceptionCode == DBG_PRINTEXCEPTION_C)
         DoOutputDebugString("RtlDispatchException hook: DBG_PRINTEXCEPTION_C: %.08Ix, Exception Code: %08x.\n", ExceptionRecord->ExceptionInformation[1], ExceptionRecord->ExceptionCode);
@@ -1027,9 +1023,6 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
             DoOutputDebugString("RtlDispatchException: Unhandled exception! Address 0x%p, code 0x%x, flags 0x%x, %d parameters: 0x%x, 0x%x & ...\n", ExceptionRecord->ExceptionAddress, ExceptionRecord->ExceptionCode, ExceptionRecord->ExceptionFlags, ExceptionRecord->NumberParameters, ExceptionRecord->ExceptionInformation[0], ExceptionRecord->ExceptionInformation[1]);
         }
     }
-
-    if (addr_in_trampoline((ULONG_PTR)ExceptionRecord->ExceptionAddress))
-        DoOutputDebugString("RtlDispatchException: Exception originates from hook trampoline!\n");
 
     return RetVal;
 }
