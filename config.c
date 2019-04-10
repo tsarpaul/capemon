@@ -246,7 +246,7 @@ int read_config(void)
 						*p2 = '\0';
 					}
 					g_config.base_on_apiname[x++] = strdup(p);
-                    DoOutputDebugString("Added '%s' to base-on-API list.\n", p);
+                    DoOutputDebugString("Config: Added '%s' to base-on-API list.\n", p);
 					if (p2 == NULL)
 						break;
 					p = p2 + 1;
@@ -262,7 +262,7 @@ int read_config(void)
 						*p2 = '\0';
 					}
 					g_config.dump_on_apinames[x++] = strdup(p);
-                    DoOutputDebugString("Added '%s' to dump-on-API list.\n", p);
+                    DoOutputDebugString("Config: Added '%s' to dump-on-API list.\n", p);
 					if (p2 == NULL)
 						break;
 					p = p2 + 1;
@@ -280,98 +280,103 @@ int read_config(void)
                     HANDLE Module = GetModuleHandle(value);
                     if (Module)
                         bp0 = GetProcAddress(Module, p2+2);
-                    if (bp0)
-                        DoOutputDebugString("bp0 set to 0x%p (%s::%s).\n", bp0, value, p2+2);
+                    else
+                        DoOutputDebugString("Config: Failed to get base for module (%s).\n", value);
+                    if (bp0) {
+                        DoOutputDebugString("Config: bp0 set to 0x%p (%s::%s).\n", bp0, value, p2+2);
+                    }
+                    else
+                        DoOutputDebugString("Config: Failed to get address for function %s::%s.\n", value, p2+2);
                 }
                 else if (!strncmp(value, "ep", 2)) {
-                    DoOutputDebugString("bp0 set to entry point.\n", bp0);
+                    DoOutputDebugString("Config: bp0 set to entry point.\n", bp0);
                     EntryPointRegister = 1;
                 }
                 else {
                     bp0 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("bp0 set to 0x%x.\n", bp0);
+                    DoOutputDebugString("Config: bp0 set to 0x%x.\n", bp0);
                 }
 			}
             else if (!stricmp(key, "bp1")) {
                 if (!strncmp(value, "ep", 2)) {
-                    DoOutputDebugString("bp1 set to entry point.\n", bp1);
+                    DoOutputDebugString("Config: bp1 set to entry point.\n", bp1);
                     EntryPointRegister = 2;
                 }
                 else {
                     bp1 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("bp1 set to 0x%x.\n", bp1);
+                    DoOutputDebugString("Config: bp1 set to 0x%x.\n", bp1);
                 }
 			}
             else if (!stricmp(key, "bp2")) {
                 if (!strncmp(value, "ep", 2)) {
-                    DoOutputDebugString("bp2 set to entry point.\n", bp2);
+                    DoOutputDebugString("Config: bp2 set to entry point.\n", bp2);
                     EntryPointRegister = 3;
                 }
                 else {
                     bp2 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("bp2 set to 0x%x.\n", bp2);
+                    DoOutputDebugString("Config: bp2 set to 0x%x.\n", bp2);
                 }
 			}
             else if (!stricmp(key, "bp3")) {
                 if (!strncmp(value, "ep", 2)) {
-                    DoOutputDebugString("bp3 set to entry point.\n", bp3);
+                    DoOutputDebugString("Config: bp3 set to entry point.\n", bp3);
                     EntryPointRegister = 4;
                 }
                 else {
                     bp3 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("bp3 set to 0x%x.\n", bp3);
+                    DoOutputDebugString("Config: bp3 set to 0x%x.\n", bp3);
                 }
 			}
             else if (!stricmp(key, "depth")) {
 				TraceDepthLimit = (int)strtoul(value, NULL, 10);
-                DoOutputDebugString("Trace depth set to 0x%x", TraceDepthLimit);
+                DoOutputDebugString("Config: Trace depth set to 0x%x", TraceDepthLimit);
 			}
             else if (!stricmp(key, "count")) {
 				StepLimit = (unsigned int)strtoul(value, NULL, 10);
-                DoOutputDebugString("Trace instruction count set to 0x%x", StepLimit);
+                DoOutputDebugString("Config: Trace instruction count set to 0x%x", StepLimit);
 			}
             else if (!stricmp(key, "action0")) {
 				if (!stricmp(value, "ClearZeroFlag")){
                     Action0 = DoClearZeroFlag;
-                    DoOutputDebugString("Action0 set to DoClearZeroFlag.");
+                    DoOutputDebugString("Config: Action0 set to DoClearZeroFlag.");
                 }
 				else if (!stricmp(value, "SetZeroFlag")){
                     Action0 = DoSetZeroFlag;
-                    DoOutputDebugString("Action0 set to DoSetZeroFlag.");
+                    DoOutputDebugString("Config: Action0 set to DoSetZeroFlag.");
                 }
 				else if (!stricmp(value, "PrintEAX")){
                     Action0 = PrintEAX;
-                    DoOutputDebugString("Action0 set to PrintEAX.");
+                    DoOutputDebugString("Config: Action0 set to PrintEAX.");
                 }
 			}
             else if (!stricmp(key, "action1")) {
 				if (!stricmp(value, "ClearZeroFlag")){
                     Action1 = DoClearZeroFlag;
-                    DoOutputDebugString("Action1 set to DoClearZeroFlag.");
+                    DoOutputDebugString("Config: Action1 set to DoClearZeroFlag.");
                 }
 				else if (!stricmp(value, "SetZeroFlag")){
                     Action1 = DoSetZeroFlag;
-                    DoOutputDebugString("Action1 set to DoSetZeroFlag.");
+                    DoOutputDebugString("Config: Action1 set to DoSetZeroFlag.");
                 }
 			}
             else if (!stricmp(key, "instruction0")) {
                 Instruction0 = calloc(1, MAX_PATH);
                 strncpy(Instruction0, value, strlen(value));
-                DoOutputDebugString("Instruction0 set to %s.", value);
+                DoOutputDebugString("Config: Instruction0 set to %s.", value);
 			}
             else if (!stricmp(key, "instruction1")) {
                 Instruction1 = calloc(1, MAX_PATH);
                 strncpy(Instruction1, value, strlen(value));
-                DoOutputDebugString("Instruction1 set to %s.", value);
+                DoOutputDebugString("Config: Instruction1 set to %s.", value);
 			}
             else if (!stricmp(key, "break-on-return")) {
 				strncpy(g_config.break_on_return, value, ARRAYSIZE(g_config.break_on_return));
-                DoOutputDebugString("Break-on-return set to %s.", g_config.break_on_return);
+                DoOutputDebugString("Config: Break-on-return set to %s.", g_config.break_on_return);
 			}
             else if (!stricmp(key, "trace-all")) {
 				g_config.trace_all = value[0] == '1';
                 if (g_config.trace_all)
-                    DoOutputDebugString("Trace all enabled.\n");
+                    DoOutputDebugString("Config: Trace all enabled.\n");
 			}
 			else if (!stricmp(key, "trace-into-api")) {
 				unsigned int x = 0;
@@ -383,7 +388,7 @@ int read_config(void)
 						*p2 = '\0';
 					}
 					g_config.trace_into_api[x++] = strdup(p);
-                    DoOutputDebugString("Added '%s' to trace-into-API list.\n", p);
+                    DoOutputDebugString("Config: Added '%s' to trace-into-API list.\n", p);
 					if (p2 == NULL)
 						break;
 					p = p2 + 1;
@@ -391,15 +396,15 @@ int read_config(void)
 			}
             else if (!stricmp(key, "type0")) {
                 if (!strnicmp(value, "w", 1)) {
-                    DoOutputDebugString("Breakpoint 0 type set to write (Type0 = BP_WRITE).\n");
+                    DoOutputDebugString("Config: Breakpoint 0 type set to write (Type0 = BP_WRITE).\n");
                     Type0 = BP_WRITE;
                 }
                 else if (!strnicmp(value, "r", 1) || !strnicmp(value, "rw", 2)) {
-                    DoOutputDebugString("Breakpoint 0 type set to read/write (Type0 = BP_READWRITE).\n");
+                    DoOutputDebugString("Config: Breakpoint 0 type set to read/write (Type0 = BP_READWRITE).\n");
                     Type0 = BP_READWRITE;
                 }
                 else if (!strnicmp(value, "x", 1)) {
-                    DoOutputDebugString("Breakpoint 0 type set to execute (Type0 = BP_EXEC).\n");
+                    DoOutputDebugString("Config: Breakpoint 0 type set to execute (Type0 = BP_EXEC).\n");
                     Type0 = BP_EXEC;
                 }
 			}
@@ -407,9 +412,9 @@ int read_config(void)
             else if (!stricmp(key, "procdump")) {
 				g_config.procdump = value[0] == '1';
                 if (g_config.procdump)
-                    DoOutputDebugString("Process dumps enabled.\n");
+                    DoOutputDebugString("Config: Process dumps enabled.\n");
                 else
-                    DoOutputDebugString("Process dumps disabled.\n");
+                    DoOutputDebugString("Config: Process dumps disabled.\n");
 			}
             else if (!stricmp(key, "procmemdump")) {
 				// for backwards compatibility with spender
@@ -418,25 +423,25 @@ int read_config(void)
                 else
                     g_config.procmemdump = value[0] == '1';
                 if (g_config.procmemdump)
-                    DoOutputDebugString("Full process memory dumps enabled.\n");
+                    DoOutputDebugString("Config: Full process memory dumps enabled.\n");
                 else
-                    DoOutputDebugString("Full process memory dumps disabled.\n");
+                    DoOutputDebugString("Config: Full process memory dumps disabled.\n");
 			}
             else if (!stricmp(key, "import_reconstruction")) {
 				g_config.import_reconstruction = value[0] == '1';
                 if (g_config.import_reconstruction)
-                    DoOutputDebugString("Import reconstruction of process dumps enabled.\n");
+                    DoOutputDebugString("Config: Import reconstruction of process dumps enabled.\n");
                 else
-                    DoOutputDebugString("Import reconstruction of process dumps disabled.\n");
+                    DoOutputDebugString("Config: Import reconstruction of process dumps disabled.\n");
 			}
             else if (!stricmp(key, "terminate-processes")) {
 				g_config.terminate_processes = value[0] == '1';
                 if (g_config.terminate_processes)
-                    DoOutputDebugString("Terminate processes on terminate_event enabled.\n");
+                    DoOutputDebugString("Config: Terminate processes on terminate_event enabled.\n");
                 else
-                    DoOutputDebugString("Terminate processes on terminate_event disabled.\n");
+                    DoOutputDebugString("Config: Terminate processes on terminate_event disabled.\n");
 			}
-            else DoOutputDebugString("CAPE debug - unrecognised key %s.\n", key);
+            else DoOutputDebugString("Config: CAPE debug - unrecognised key %s.\n", key);
 		}
     }
 

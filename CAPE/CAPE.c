@@ -1894,8 +1894,8 @@ int DumpPE(LPVOID Buffer)
 void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
 //**************************************************************************************
 {
-    PIMAGE_DOS_HEADER pDosHeader;
-    wchar_t *MappedPath, *ModulePath, *AbsoluteMapped, *AbsoluteModule;
+    //PIMAGE_DOS_HEADER pDosHeader;
+    //wchar_t *MappedPath, *ModulePath, *AbsoluteMapped, *AbsoluteModule;
 
     if (!MemInfo.BaseAddress)
         return;
@@ -2103,9 +2103,58 @@ out:
     return ProcessDumped;
 }
 
+void RestoreHeaders()
+{
+    DWORD ImportsRVA, ImportsSize, SizeOfHeaders, dwProtect;
+    PVOID BaseAddress, ImportsVA;
+    PIMAGE_DOS_HEADER pDosHeader;
+    PIMAGE_NT_HEADERS pNtHeaders;
+
+    BaseAddress = GetModuleHandle(NULL);
+    SizeOfHeaders = sizeof(IMAGE_NT_HEADERS);
+    pDosHeader = (PIMAGE_DOS_HEADER)BaseAddress;
+    pNtHeaders = (PIMAGE_NT_HEADERS)((PBYTE)BaseAddress + pDosHeader->e_lfanew);
+    ImportsRVA = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    ImportsSize = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+    ImportsVA = (PBYTE)BaseAddress + ImportsRVA;
+
+    // Check if we have a PE header after import table
+    if (*(DWORD*)((PBYTE)ImportsVA + ImportsSize) != IMAGE_NT_SIGNATURE)
+        return;
+
+    // Set page permissions to allow writing of original headers
+    if (!VirtualProtect((PBYTE)BaseAddress, SizeOfHeaders, PAGE_EXECUTE_READWRITE, &dwProtect))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to modify memory page protection of NtHeaders");
+        return;
+    }
+
+    memcpy((PBYTE)BaseAddress + pDosHeader->e_lfanew, (PBYTE)ImportsVA + ImportsSize, SizeOfHeaders);
+
+    // Restore original protection
+    if (!VirtualProtect((PBYTE)BaseAddress, SizeOfHeaders, dwProtect, &dwProtect))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to restore previous memory page protection");
+        return;
+    }
+
+    // Free memory
+    if (!VirtualFree(ImportsVA, 0, MEM_RELEASE))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to free memory for patched IAT");
+        return;
+    }
+
+    DoOutputDebugString("RestoreHeaders: Restored original import table.\n");
+}
+
 void init_CAPE()
 {
     char* CommandLine;
+
+    // Restore headers in case of IAT patching
+    RestoreHeaders();
+
     // Initialise CAPE global variables
     //
 #ifndef STANDALONE
@@ -2143,9 +2192,9 @@ void init_CAPE()
             DoOutputDebugString("Failed to initialise debugger.\n");
 
 #ifdef _WIN64
-    DoOutputDebugString("CAPE initialised: 64-bit Trace package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 64-bit Debugger package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
 #else
-    DoOutputDebugString("CAPE initialised: 32-bit Trace package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 32-bit Debugger package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
 #endif
     DoOutputDebugString("Commandline: %s.\n", CommandLine);
 

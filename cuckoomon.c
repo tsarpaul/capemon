@@ -75,7 +75,7 @@ void disable_tail_call_optimization(void)
 #define HOOK_NOTAIL(library, funcname, numargs) {L###library, #funcname, NULL, NULL, \
     &New_##funcname, NULL, NULL, TRUE, FALSE, numargs, TRUE}
 
-static hook_t g_hooks[] = {
+hook_t g_hooks[] = {
 
     //
     // Special Hooks
@@ -657,6 +657,8 @@ static hook_t g_hooks[] = {
 	HOOK(cryptsp, CryptEnumProvidersW),
 	HOOK(cryptsp, CryptHashSessionKey),
 };
+
+size_t g_hooks_size = sizeof(g_hooks);
 
 void set_hooks_dll(const wchar_t *library)
 {

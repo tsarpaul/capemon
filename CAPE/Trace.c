@@ -24,7 +24,7 @@ along with this program.If not, see <http://www.gnu.org/licenses/>.
 #define MAX_INSTRUCTIONS 0x10
 #define SINGLE_STEP_LIMIT 0x400  // default unless specified in web ui
 #define CHUNKSIZE 0x10 * MAX_INSTRUCTIONS
-
+#define RVA_LIMIT 0x100000
 #define DoClearZeroFlag 1
 #define DoSetZeroFlag   2
 #define PrintEAX        3
@@ -760,6 +760,9 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
 
     TraceAll = g_config.trace_all;
 
+	if (TraceAll)
+		DoOutputDebugString("SetInitialBreakpoints: Trace mode: All.\n");
+
     if (!StepLimit)
         StepLimit = SINGLE_STEP_LIMIT;
 
@@ -808,7 +811,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
         Register = 0;
         PVOID Callback;
 
-        if ((SIZE_T)bp0 > 0x10000)
+        if ((SIZE_T)bp0 > RVA_LIMIT)
             BreakpointVA = (DWORD_PTR)bp0;
         else
             BreakpointVA = (DWORD_PTR)ImageBase + (DWORD_PTR)bp0;
@@ -819,7 +822,8 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
             Callback = BreakpointCallback;
         }
         else if (Type0 == BP_WRITE)
-            Callback = WriteCallback;
+            Callback = BreakpointCallback;
+            //Callback = WriteCallback;
 
         if (SetBreakpoint(Register, 0, (BYTE*)BreakpointVA, Type0, Callback))
         {
@@ -839,7 +843,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
         Register = 1;
         PVOID Callback;
 
-        if ((SIZE_T)bp1 > 0x10000)
+        if ((SIZE_T)bp1 > RVA_LIMIT)
             BreakpointVA = (DWORD_PTR)bp1;
         else
             BreakpointVA = (DWORD_PTR)ImageBase + (DWORD_PTR)bp1;
@@ -870,7 +874,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
         Register = 2;
         PVOID Callback;
 
-        if ((SIZE_T)bp2 > 0x10000)
+        if ((SIZE_T)bp2 > RVA_LIMIT)
             BreakpointVA = (DWORD_PTR)bp2;
         else
             BreakpointVA = (DWORD_PTR)ImageBase + (DWORD_PTR)bp2;
@@ -901,7 +905,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
         Register = 3;
         PVOID Callback;
 
-        if ((SIZE_T)bp3 > 0x10000)
+        if ((SIZE_T)bp3 > RVA_LIMIT)
             BreakpointVA = (DWORD_PTR)bp3;
         else
             BreakpointVA = (DWORD_PTR)ImageBase + (DWORD_PTR)bp3;
