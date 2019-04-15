@@ -3034,3 +3034,8 @@ extern HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
   UINT  message,
   DWORD dwFlag
 );
+
+extern HOOKDEF(PCSTR, WINAPI, StrStrIA,
+  PCSTR pszFirst,
+  PCSTR pszSrch
+);

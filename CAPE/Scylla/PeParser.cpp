@@ -5,7 +5,7 @@
 
 #pragma comment(lib, "Imagehlp.lib")
 
-//#define DEBUG_COMMENTS
+#define DEBUG_COMMENTS
 #define SIZE_LIMIT  0x1000000
 
 extern "C" void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
@@ -298,6 +298,16 @@ bool PeParser::readPeHeaderFromFile(bool readSectionHeaders)
 	return retValue;
 }
 
+bool PeFileSectionSortByPointerToRawData(const PeFileSection& d1, const PeFileSection& d2)
+{
+	return d1.sectionHeader.PointerToRawData < d2.sectionHeader.PointerToRawData;
+}
+
+bool PeFileSectionSortByVirtualAddress(const PeFileSection& d1, const PeFileSection& d2)
+{
+	return d1.sectionHeader.VirtualAddress < d2.sectionHeader.VirtualAddress;
+}
+
 bool PeParser::readPeSectionsFromProcess()
 {
 	bool retValue = true;
@@ -318,7 +328,9 @@ bool PeParser::readPeSectionsFromProcess()
 
 	listPeSection.reserve(NumberOfSections);
     
-	for (WORD i = 0; i < NumberOfSections; i++)
+    std::sort(listPeSection.begin(), listPeSection.end(), PeFileSectionSortByVirtualAddress); //sort by VirtualAddress ascending
+
+    for (WORD i = 0; i < NumberOfSections; i++)
 	{
 		readOffset = listPeSection[i].sectionHeader.VirtualAddress + moduleBaseAddress;
 
@@ -1584,16 +1596,6 @@ void PeParser::setDefaultFileAlignment()
 	{
 		pNTHeader64->OptionalHeader.FileAlignment = FileAlignmentConstant;
 	}
-}
-
-bool PeFileSectionSortByPointerToRawData(const PeFileSection& d1, const PeFileSection& d2)
-{
-	return d1.sectionHeader.PointerToRawData < d2.sectionHeader.PointerToRawData;
-}
-
-bool PeFileSectionSortByVirtualAddress(const PeFileSection& d1, const PeFileSection& d2)
-{
-	return d1.sectionHeader.VirtualAddress < d2.sectionHeader.VirtualAddress;
 }
 
 void PeParser::alignAllSectionHeaders()

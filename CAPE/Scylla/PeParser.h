@@ -50,6 +50,7 @@ public:
 	bool isPE64();
 	bool isPE32();
 
+	DWORD alignValue(DWORD badValue, DWORD alignTo);
 	bool isTargetFileSamePeFormat();
 
 	WORD getNumberOfSections();
@@ -93,14 +94,13 @@ public:
 	DWORD_PTR convertRVAToOffsetRelative(DWORD_PTR dwRVA);
 	DWORD getSectionAddressRVAByIndex( int index );
 
+	void getDosAndNtHeader(BYTE * memory, LONG size);
     PIMAGE_NT_HEADERS getCurrentNtHeader();
 	std::vector<PeFileSection> listPeSection;
 
 	DWORD dumpSize;
 
-protected:
 	PeParser();
-
 
 	static const DWORD FileAlignmentConstant = 0x200;
 
@@ -124,6 +124,7 @@ protected:
 	BYTE * overlayData;
 	DWORD overlaySize;
 	/************************************************************************/
+protected:
 
 	BYTE * fileMemory;
 	BYTE * headerMemory;
@@ -137,7 +138,6 @@ protected:
 
 	bool hasDirectory(const int directoryIndex);
 	bool getSectionHeaders();
-	void getDosAndNtHeader(BYTE * memory, LONG size);
 	DWORD calcCorrectPeHeaderSize( bool readSectionHeaders );
 	DWORD getInitialHeaderReadSize( bool readSectionHeaders );
 	bool openFileHandle();
@@ -159,7 +159,6 @@ protected:
 	DWORD_PTR getStandardImagebase();
 
 	bool addNewLastSection(const CHAR * sectionName, DWORD sectionSize, BYTE * sectionData);
-	DWORD alignValue(DWORD badValue, DWORD alignTo);
 
 	void setNumberOfSections(WORD numberOfSections);
 	

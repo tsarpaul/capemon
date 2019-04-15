@@ -229,9 +229,8 @@ int WINAPI enter_hook(hook_t *h, ULONG_PTR sp, ULONG_PTR ebp_or_rip)
 
 		operate_on_backtrace(sp, ebp_or_rip, NULL, set_caller_info);
 
-#ifdef CAPE_DUMP_ON_API
+        // This is enabled for IcedID package
 		dump_on_api(h);
-#endif
 #ifdef CAPE_TRACE
 		base_on_api(h);
 #endif

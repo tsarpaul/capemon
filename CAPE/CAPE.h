@@ -154,6 +154,9 @@ enum {
     CERBER_CONFIG           = 0x30,
     CERBER_PAYLOAD          = 0x31,
 
+    ICEDID_LOADER           = 0x40,
+    ICEDID_BOT              = 0x41,
+
     DATADUMP                = 0x66
 };
 

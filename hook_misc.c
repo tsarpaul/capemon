@@ -593,7 +593,7 @@ HOOKDEF(SHORT, WINAPI, GetAsyncKeyState,
 	return ret;
 }
 
-#ifndef CAPE_COMPRESSION
+#ifndef CAPE_ICEDID
 HOOKDEF(NTSTATUS, WINAPI, RtlDecompressBuffer,
 	__in USHORT CompressionFormat,
 	__out PUCHAR UncompressedBuffer,
@@ -1490,5 +1490,16 @@ HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
     else
         ret = Old_ChangeWindowMessageFilter(message, dwFlag);
 	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
+	return ret;
+}
+
+HOOKDEF(PCSTR, WINAPI, StrStrIA,
+  PCSTR pszFirst,
+  PCSTR pszSrch
+)
+{
+    PCSTR ret;
+    ret = Old_StrStrIA(pszFirst, pszSrch);
+	LOQ_nonzero("misc", "ss", "pszFirst", pszFirst, "pszSrch", pszSrch);
 	return ret;
 }

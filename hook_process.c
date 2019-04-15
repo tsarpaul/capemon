@@ -48,7 +48,9 @@ extern void ProtectionHandler(PVOID BaseAddress, SIZE_T RegionSize, ULONG Protec
 extern void FreeHandler(PVOID BaseAddress);
 extern void ProcessTrackedRegion();
 #endif
-
+#ifdef CAPE_ICEDID
+extern void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite);
+#endif
 extern void file_handle_terminate();
 extern int DoProcessDump(PVOID CallerBase);
 extern PVOID GetHookCallerBase();
@@ -668,6 +670,9 @@ HOOKDEF(NTSTATUS, WINAPI, NtWriteVirtualMemory,
 		if (NT_SUCCESS(ret)) {
 #ifdef CAPE_INJECTION
             WriteMemoryHandler(ProcessHandle, BaseAddress, Buffer, *NumberOfBytesWritten);
+#endif
+#ifdef CAPE_ICEDID
+            DumpIcedIDPayload((PVOID)Buffer, NumberOfBytesToWrite);
 #endif
 			pipe("PROCESS:%d:%d", is_suspended(pid, 0), pid);
 			disable_sleep_skip();

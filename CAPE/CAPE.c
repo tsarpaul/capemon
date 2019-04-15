@@ -1894,8 +1894,8 @@ int DumpPE(LPVOID Buffer)
 void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
 //**************************************************************************************
 {
-    PIMAGE_DOS_HEADER pDosHeader;
-    wchar_t *MappedPath, *ModulePath, *AbsoluteMapped, *AbsoluteModule;
+    //PIMAGE_DOS_HEADER pDosHeader;
+    //wchar_t *MappedPath, *ModulePath, *AbsoluteMapped, *AbsoluteModule;
 
     if (!MemInfo.BaseAddress)
         return;
@@ -2117,7 +2117,7 @@ void init_CAPE()
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_commandline, (int)wcslen(our_commandline)+1, CommandLine, MAX_PATH, NULL, NULL);
 
     // This is package (and technique) dependent:
-    CapeMetaData->DumpType = PROCDUMP;
+    CapeMetaData->DumpType = ICEDID_LOADER;
     ProcessDumped = FALSE;
 
     DumpCount = 0;
@@ -2126,7 +2126,7 @@ void init_CAPE()
     // made at the end of a process' lifetime.
     // It is normally only set in the base packages,
     // or upon submission. (This overrides submission.)
-    // g_config.procdump = 0;
+    g_config.procdump = 0;
 
     InitializeCriticalSection(&ProcessDumpCriticalSection);
 
@@ -2145,9 +2145,9 @@ void init_CAPE()
             DoOutputDebugString("Failed to initialise debugger.\n");
 
 #ifdef _WIN64
-    DoOutputDebugString("CAPE initialised: 64-bit base package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 64-bit IcedID package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
 #else
-    DoOutputDebugString("CAPE initialised: 32-bit base package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 32-bit IcedID package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
 #endif
 
     DoOutputDebugString("Commandline: %s.\n", CommandLine);

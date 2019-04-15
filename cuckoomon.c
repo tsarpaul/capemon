@@ -87,7 +87,7 @@ static hook_t g_hooks[] = {
 
 	HOOK_NOTAIL_ALT(ntdll, LdrLoadDll, 4),
 	HOOK_NOTAIL(ntdll, LdrUnloadDll, 1),
-    HOOK_SPECIAL(kernel32, CreateProcessInternalW),
+    //HOOK_SPECIAL(kernel32, CreateProcessInternalW),   // disabled for IcedID package
 	//HOOK_SPECIAL(ntdll, NtCreateThread),
 	//HOOK_SPECIAL(ntdll, NtCreateThreadEx),
 	//HOOK_SPECIAL(ntdll, NtTerminateThread),
@@ -373,11 +373,11 @@ static hook_t g_hooks[] = {
     // Misc Hooks
     //
 
-    // for debugging only
 	//HOOK(kernel32, GetLastError),
 #ifndef _WIN64
 	HOOK(ntdll, memcpy),
 #endif
+	HOOK(shlwapi, StrStrIA),
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
     HOOK(user32, ChangeWindowMessageFilter),
