@@ -49,7 +49,7 @@ extern void FreeHandler(PVOID BaseAddress);
 extern void ProcessTrackedRegion();
 #endif
 #ifdef CAPE_ICEDID
-extern void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite);
+extern void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite, PVOID ImageBase);
 #endif
 extern void file_handle_terminate();
 extern int DoProcessDump(PVOID CallerBase);
@@ -672,7 +672,7 @@ HOOKDEF(NTSTATUS, WINAPI, NtWriteVirtualMemory,
             WriteMemoryHandler(ProcessHandle, BaseAddress, Buffer, *NumberOfBytesWritten);
 #endif
 #ifdef CAPE_ICEDID
-            DumpIcedIDPayload((PVOID)Buffer, NumberOfBytesToWrite);
+            DumpIcedIDPayload((PVOID)Buffer, NumberOfBytesToWrite, BaseAddress);
 #endif
 			pipe("PROCESS:%d:%d", is_suspended(pid, 0), pid);
 			disable_sleep_skip();

@@ -88,7 +88,7 @@ extern "C" int GetIcedIDHeader(PVOID Payload)
     pNtHeader->OptionalHeader.AddressOfEntryPoint = IcedIDBotHeader->RtlExitUserProcessHook;
     //pNtHeader->OptionalHeader.BaseOfCode;
     //pNtHeader->OptionalHeader.BaseOfData;
-    pNtHeader->OptionalHeader.ImageBase = 0x400000;
+    //pNtHeader->OptionalHeader.ImageBase = 0x400000;
     pNtHeader->OptionalHeader.SectionAlignment = 0x1000;
     pNtHeader->OptionalHeader.FileAlignment = 0x200;
     pNtHeader->OptionalHeader.MajorOperatingSystemVersion = 5;
@@ -106,8 +106,6 @@ extern "C" int GetIcedIDHeader(PVOID Payload)
     pNtHeader->OptionalHeader.SizeOfHeapCommit = 0x1000;
     pNtHeader->OptionalHeader.NumberOfRvaAndSizes = 0x10;
 
-    pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = IcedIDBotHeader->ImportsPointer;
-
     IcedPE = new PeParser((PCHAR)PEHeader, FALSE);
     IcedPE->getDosAndNtHeader(PEHeader, HeadersSize);
 
@@ -117,10 +115,11 @@ extern "C" int GetIcedIDHeader(PVOID Payload)
     return 1;
 }
 
-extern "C" void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite)
+extern "C" void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite, PVOID ImageBase)
 {
 	PIMAGE_SECTION_HEADER pSection = IMAGE_FIRST_SECTION(IcedPE->pNTHeader32);
 	PeFileSection peFileSection;
+    PIMAGE_IMPORT_DESCRIPTOR pImageDescriptor;
 
 	if (!IcedIDBotHeader || NumberOfBytesToWrite != IcedIDBotHeader->VirtualSizeOfImage || !IcedIDBotHeader->NumberOfSections)
         return;
@@ -128,7 +127,20 @@ extern "C" void DumpIcedIDPayload(PVOID Payload, SIZE_T NumberOfBytesToWrite)
     IcedPE->listPeSection.clear();
 	IcedPE->listPeSection.reserve(IcedIDBotHeader->NumberOfSections);
 
-	for (DWORD i = 0; i < IcedIDBotHeader->NumberOfSections; i++)
+    IcedPE->pNTHeader32->OptionalHeader.ImageBase = (DWORD)ImageBase;
+    IcedPE->pNTHeader32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = IcedIDBotHeader->ImportsPointer;
+
+    pImageDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)((PBYTE)Payload + IcedIDBotHeader->ImportsPointer);
+    while (pImageDescriptor->Characteristics)
+    {
+        IcedPE->pNTHeader32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+        pImageDescriptor++;
+    }
+    DoOutputDebugString("DumpIcedIDPayload: Size of import table 0x%x.\n", IcedPE->pNTHeader32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size);
+
+    IcedPE->pNTHeader32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = IcedIDBotHeader->ImportsPointer;
+
+    for (DWORD i = 0; i < IcedIDBotHeader->NumberOfSections; i++)
 	{
 		memset(&peFileSection.sectionHeader, 0, sizeof(IMAGE_SECTION_HEADER));
         peFileSection.sectionHeader.Misc.VirtualSize = IcedPE->alignValue(IcedIDSectionHeaders->VirtualSize, IcedPE->pNTHeader32->OptionalHeader.SectionAlignment);
