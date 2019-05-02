@@ -33,6 +33,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #ifdef CAPE_INJECTION
 extern void DuplicationHandler(HANDLE SourceProcessHandle, HANDLE TargetHandle);
+extern void DumpSectionViewsForHandle(HANDLE SectionHandle);
 #endif
 
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
