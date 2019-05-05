@@ -1,6 +1,6 @@
 /*
 CAPE - Config And Payload Extraction
-Copyright(C) 2015 - 2018 Context Information Security. (kevin.oreilly@contextis.com)
+Copyright(C) 2019 Kevin O'Reilly (kevoreilly@gmail.com)
 
 This program is free software : you can redistribute it and / or modify
 it under the terms of the GNU General Public License as published by
@@ -469,7 +469,7 @@ void DumpSectionView(PINJECTIONSECTIONVIEW SectionView)
         PVOID BaseAddress = NULL;
 
         DoOutputDebugString("DumpSectionView: About to remap section with handle 0x%x, size 0x%x.\n", SectionView->SectionHandle, SectionView->ViewSize);
-        
+
         NTSTATUS ret = pNtMapViewOfSection(SectionView->SectionHandle, NtCurrentProcess(), &BaseAddress, 0, 0, 0, &ViewSize, ViewUnmap, 0, PAGE_READWRITE);
 
         if (NT_SUCCESS(ret))
@@ -494,7 +494,7 @@ void DumpSectionView(PINJECTIONSECTIONVIEW SectionView)
                 else
                     DoOutputDebugString("DumpSectionView: Failed to dump remapped section view with handle 0x%x.\n", SectionView->SectionHandle);
             }
-            
+
             pNtUnmapViewOfSection(SectionView->SectionHandle, BaseAddress);
         }
         else
@@ -560,10 +560,16 @@ void GetThreadContextHandler(DWORD Pid, LPCONTEXT Context)
 
 void SetThreadContextHandler(DWORD Pid, const CONTEXT *Context)
 {
-	if (Context && Context->ContextFlags & CONTEXT_CONTROL)
+	MEMORY_BASIC_INFORMATION MemoryInfo;
+    if (Context && Context->ContextFlags & CONTEXT_CONTROL)
     {
         struct InjectionInfo *CurrentInjectionInfo = GetInjectionInfo(Pid);
 #ifdef _WIN64
+        if (VirtualQueryEx(CurrentInjectionInfo->ProcessHandle, (PVOID)Context->Rcx, &MemoryInfo, sizeof(MemoryInfo)))
+            CurrentInjectionInfo->ImageBase = (DWORD_PTR)MemoryInfo.AllocationBase;
+        else
+            DoOutputErrorString("SetThreadContextHandler: Failed to query target process memory at address 0x%p", Context->Rcx);
+
         if (CurrentInjectionInfo && CurrentInjectionInfo->ProcessId == Pid)
             CurrentInjectionInfo->EntryPoint = Context->Rcx - CurrentInjectionInfo->ImageBase;  // rcx holds ep on 64-bit
 
@@ -572,6 +578,11 @@ void SetThreadContextHandler(DWORD Pid, const CONTEXT *Context)
         else
             DoOutputDebugString("SetThreadContextHandler: Hollow process entry point reset via NtSetContextThread to 0x%p (process %d).\n", CurrentInjectionInfo->EntryPoint, Pid);
 #else
+        if (VirtualQueryEx(CurrentInjectionInfo->ProcessHandle, (PVOID)Context->Eax, &MemoryInfo, sizeof(MemoryInfo)))
+            CurrentInjectionInfo->ImageBase = (DWORD_PTR)MemoryInfo.AllocationBase;
+        else
+            DoOutputErrorString("SetThreadContextHandler: Failed to query target process memory at address 0x%x", Context->Eax);
+
         if (CurrentInjectionInfo && CurrentInjectionInfo->ProcessId == Pid)
             CurrentInjectionInfo->EntryPoint = Context->Eax - CurrentInjectionInfo->ImageBase;  // eax holds ep on 32-bit
 
@@ -593,19 +604,17 @@ void ResumeThreadHandler(DWORD Pid)
         return;
     }
 
-    if (CurrentInjectionInfo->ImageBase && CurrentInjectionInfo->WriteDetected && CurrentInjectionInfo->ImageDumped == FALSE)
+    if (CurrentInjectionInfo->ImageBase && !CurrentInjectionInfo->ImageDumped)
     {
         CapeMetaData->DumpType = INJECTION_PE;
         CapeMetaData->TargetPid = Pid;
 
         DoOutputDebugString("ResumeThreadHandler: Dumping hollowed process %d, image base 0x%p.\n", Pid, CurrentInjectionInfo->ImageBase);
 
-        CurrentInjectionInfo->ImageDumped = DumpProcess(CurrentInjectionInfo->ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase);
+        CurrentInjectionInfo->ImageDumped = DumpProcess(CurrentInjectionInfo->ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase, (PVOID)CurrentInjectionInfo->EntryPoint);
 
         if (CurrentInjectionInfo->ImageDumped)
-        {
             DoOutputDebugString("ResumeThreadHandler: Dumped PE image from buffer.\n");
-        }
         else
             DoOutputDebugString("ResumeThreadHandler: Failed to dump PE image from buffer.\n");
     }
@@ -668,15 +677,14 @@ void CreateRemoteThreadHandler(DWORD Pid)
         return;
     }
 
-    //if (CurrentInjectionInfo->ImageBase && CurrentInjectionInfo->WriteDetected && CurrentInjectionInfo->ImageDumped == FALSE)
-    if (CurrentInjectionInfo->ImageDumped == FALSE)
+    if (!CurrentInjectionInfo->ImageDumped)
     {
         CapeMetaData->DumpType = INJECTION_PE;
         CapeMetaData->TargetPid = Pid;
 
         DoOutputDebugString("CreateRemoteThreadHandler: Dumping hollowed process %d, image base 0x%p.\n", Pid, CurrentInjectionInfo->ImageBase);
 
-        CurrentInjectionInfo->ImageDumped = DumpProcess(CurrentInjectionInfo->ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase);
+        CurrentInjectionInfo->ImageDumped = DumpProcess(CurrentInjectionInfo->ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase, (PVOID)CurrentInjectionInfo->EntryPoint);
 
         if (CurrentInjectionInfo->ImageDumped)
         {
@@ -748,18 +756,16 @@ void ResumeProcessHandler(HANDLE ProcessHandle, DWORD Pid)
 
     if (CurrentInjectionInfo)
     {
-        if (CurrentInjectionInfo->ImageBase && CurrentInjectionInfo->WriteDetected && CurrentInjectionInfo->ImageDumped == FALSE)
+        if (CurrentInjectionInfo->ImageBase && CurrentInjectionInfo->ImageDumped == FALSE)
         {
             SetCapeMetaData(INJECTION_PE, Pid, ProcessHandle, NULL);
 
             DoOutputDebugString("ResumeProcessHandler: Dumping hollowed process %d, image base 0x%p.\n", Pid, CurrentInjectionInfo->ImageBase);
 
-            CurrentInjectionInfo->ImageDumped = DumpProcess(ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase);
+            CurrentInjectionInfo->ImageDumped = DumpProcess(ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase, (PVOID)CurrentInjectionInfo->EntryPoint);
 
             if (CurrentInjectionInfo->ImageDumped)
-            {
                 DoOutputDebugString("ResumeProcessHandler: Dumped PE image from buffer.\n");
-            }
             else
                 DoOutputDebugString("ResumeProcessHandler: Failed to dump PE image from buffer.\n");
         }
@@ -1033,12 +1039,6 @@ void DuplicationHandler(HANDLE SourceHandle, HANDLE TargetHandle)
         return;
     }
 
-    //if (!CurrentInjectionInfo)
-    //{
-    //    DoOutputDebugString("DuplicationHandler: Failed to find injection info for target process %d.\n", Pid);
-    //    return;
-    //}
-
     CurrentSectionView = GetSectionView(SourceHandle);
 
     if (!CurrentSectionView)
@@ -1094,4 +1094,29 @@ void DuplicationHandler(HANDLE SourceHandle, HANDLE TargetHandle)
                 DoOutputDebugString("DuplicationHandler: Error, failed to add section view with handle 0x%x and target process %d (%ws).\n", SourceHandle, Pid, CurrentSectionView->SectionName);
         }
     }
+}
+
+void TerminateHandler()
+{
+    PINJECTIONINFO CurrentInjectionInfo = InjectionInfoList;
+
+	while (CurrentInjectionInfo && CurrentInjectionInfo->ProcessHandle && CurrentInjectionInfo->ImageBase && CurrentInjectionInfo->ProcessId)
+	{
+        if (!CurrentInjectionInfo->ImageDumped)
+        {
+            CapeMetaData->DumpType = INJECTION_PE;
+            CapeMetaData->TargetPid = CurrentInjectionInfo->ProcessId;
+
+            DoOutputDebugString("TerminateHandler: Dumping hollowed process %d, image base 0x%p.\n", CurrentInjectionInfo->ProcessId, CurrentInjectionInfo->ImageBase);
+
+            CurrentInjectionInfo->ImageDumped = DumpProcess(CurrentInjectionInfo->ProcessHandle, (PVOID)CurrentInjectionInfo->ImageBase, (PVOID)CurrentInjectionInfo->EntryPoint);
+
+            if (CurrentInjectionInfo->ImageDumped)
+                DoOutputDebugString("TerminateHandler: Dumped PE image from buffer.\n");
+            else
+                DoOutputDebugString("TerminateHandler: Failed to dump PE image from buffer.\n");
+        }
+
+        CurrentInjectionInfo = CurrentInjectionInfo->NextInjectionInfo;
+	}
 }

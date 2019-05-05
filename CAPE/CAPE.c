@@ -129,6 +129,9 @@ extern PVOID CallingModule;
 extern BOOL SetInitialBreakpoints(PVOID ImageBase);
 extern BOOL BreakpointsSet;
 #endif
+#ifdef CAPE_INJECTION
+extern void TerminateHandler();
+#endif
 
 BOOL ProcessDumped, FilesDumped, ModuleDumped;
 static unsigned int DumpCount;
@@ -1487,10 +1490,10 @@ int DumpImageInCurrentProcess(LPVOID ImageBase)
 }
 
 //**************************************************************************************
-int DumpProcess(HANDLE hProcess, LPVOID ImageBase)
+int DumpProcess(HANDLE hProcess, LPVOID ImageBase, LPVOID NewEP)
 //**************************************************************************************
 {
-	if (DumpCount < DUMP_MAX && ScyllaDumpProcess(hProcess, (DWORD_PTR)ImageBase, 0))
+	if (DumpCount < DUMP_MAX && ScyllaDumpProcess(hProcess, (DWORD_PTR)ImageBase, (DWORD_PTR)NewEP))
 	{
 		DumpCount++;
 		return 1;
@@ -1540,6 +1543,9 @@ int RoutineProcessDump()
         }
     }
 
+#ifdef CAPE_INJECTION
+    TerminateHandler();
+#endif
 	return ProcessDumped;
 }
 

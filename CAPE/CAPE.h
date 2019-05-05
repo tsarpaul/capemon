@@ -31,7 +31,7 @@ BOOL DumpRegion(PVOID Address);
 int DumpMemory(LPVOID Buffer, SIZE_T Size);
 int DumpCurrentProcessNewEP(LPVOID NewEP);
 int DumpCurrentProcess();
-int DumpProcess(HANDLE hProcess, LPVOID ImageBase);
+int DumpProcess(HANDLE hProcess, LPVOID ImageBase, LPVOID NewEP);
 int DumpPE(LPVOID Buffer);
 int ScanForNonZero(LPVOID Buffer, SIZE_T Size);
 int ScanPageForNonZero(LPVOID Address);
