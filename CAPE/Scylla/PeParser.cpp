@@ -320,23 +320,23 @@ bool PeParser::readPeSectionsFromProcess()
     
 	for (WORD i = 0; i < NumberOfSections; i++)
 	{
-		readOffset = listPeSection[i].sectionHeader.VirtualAddress + moduleBaseAddress;
-
 		if (i < NumberOfSections - 1)
         {
-            if ((listPeSection[i].sectionHeader.Misc.VirtualSize) > (listPeSection[i+1].sectionHeader.VirtualAddress - listPeSection[i].sectionHeader.VirtualAddress))
+            if (listPeSection[i].sectionHeader.Misc.VirtualSize > (listPeSection[i+1].sectionHeader.VirtualAddress - listPeSection[i].sectionHeader.VirtualAddress))
             {
                 listPeSection[i].normalSize = alignValue(listPeSection[i+1].sectionHeader.VirtualAddress - listPeSection[i].sectionHeader.VirtualAddress, sectionAlignment);
 #ifdef DEBUG_COMMENTS
                 DoOutputDebugString("PeParser::readPeSectionsFromProcess: Correcting VirtualSize for section %d from 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize, listPeSection[i].normalSize);
 #endif
+                listPeSection[i].sectionHeader.Misc.VirtualSize = listPeSection[i].normalSize;
             }
             else
             {
                 listPeSection[i].normalSize = alignValue(listPeSection[i].sectionHeader.Misc.VirtualSize, sectionAlignment);
+                listPeSection[i].sectionHeader.Misc.VirtualSize = listPeSection[i].normalSize;
 #ifdef DEBUG_COMMENTS
                 DoOutputDebugString("PeParser::readPeSectionsFromProcess: VirtualSize for section %d ok: 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
-#endif           
+#endif
             }
 
             if (i)
@@ -352,21 +352,29 @@ bool PeParser::readPeSectionsFromProcess()
                 }
             }
         }
-        else 
+        else // last section
         {
-            if ((listPeSection[i].sectionHeader.Misc.VirtualSize) > alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment))
+            DWORD NewVirtualSize = alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment);
+
+            if (NewVirtualSize && listPeSection[i].sectionHeader.Misc.VirtualSize > NewVirtualSize)
             {
+                listPeSection[i].normalSize = NewVirtualSize;
 #ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::readPeSectionsFromProcess: Correcting VirtualSize for last section (%d) from 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize, alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment));
+                DoOutputDebugString("PeParser::readPeSectionsFromProcess: Correcting VirtualSize for last section (%d) from 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize, NewVirtualSize);
 #endif
-                listPeSection[i].normalSize = alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment);
+                listPeSection[i].sectionHeader.Misc.VirtualSize = NewVirtualSize;
             }
             else
             {
-                listPeSection[i].normalSize = alignValue(listPeSection[i].sectionHeader.Misc.VirtualSize, sectionAlignment);
+                NewVirtualSize = alignValue(listPeSection[i].sectionHeader.Misc.VirtualSize, sectionAlignment);
+                if (NewVirtualSize && listPeSection[i].sectionHeader.Misc.VirtualSize > NewVirtualSize)
+                {
+                    listPeSection[i].sectionHeader.Misc.VirtualSize = NewVirtualSize;
+                    listPeSection[i].normalSize = NewVirtualSize;
 #ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::readPeSectionsFromProcess: VirtualSize for last section (%d) ok: 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
+                    DoOutputDebugString("PeParser::readPeSectionsFromProcess: VirtualSize for last section (%d) ok: 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
 #endif
+                }
             }
 
             if (i)
@@ -389,6 +397,8 @@ bool PeParser::readPeSectionsFromProcess()
 			return false;
         }
 
+		readOffset = listPeSection[i].sectionHeader.VirtualAddress + moduleBaseAddress;
+
 		if (!readSectionFromProcess(readOffset, listPeSection[i]))
 		{
 #ifdef DEBUG_COMMENTS
@@ -397,6 +407,7 @@ bool PeParser::readPeSectionsFromProcess()
 			retValue = false;
 		}
 	}
+
 #ifdef DEBUG_COMMENTS
             DoOutputDebugString("PeParser::readPeSectionsFromProcess: readSectionFromProcess success.\n");
 #endif
@@ -447,7 +458,15 @@ bool PeParser::getSectionHeaders()
 
 	for (WORD i = 0; i < getNumberOfSections(); i++)
 	{
-		memcpy_s(&peFileSection.sectionHeader, sizeof(IMAGE_SECTION_HEADER), pSection, sizeof(IMAGE_SECTION_HEADER));
+        __try
+        {
+            memcpy_s(&peFileSection.sectionHeader, sizeof(IMAGE_SECTION_HEADER), pSection, sizeof(IMAGE_SECTION_HEADER));
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            DoOutputDebugString("getSectionHeaders: Exception copying section header at 0x%p.\n", pSection);
+            return FALSE;
+        }
 
 		listPeSection.push_back(peFileSection);
 		pSection++;
@@ -1478,6 +1497,116 @@ DWORD_PTR PeParser::convertOffsetToRVAVector(DWORD_PTR dwOffset)
 	return 0;
 }
 
+BOOL PeParser::reBasePEImage(DWORD_PTR NewBase)
+{
+	PIMAGE_RELOCATION    pR;
+	DWORD_PTR            dwDelta;
+	DWORD                *pdwAddr, dwRva, dwType;
+	UINT                 iItems, i;
+	WORD                 *pW;
+	PIMAGE_NT_HEADERS    pNT;
+
+	if (isPE32())    
+        pNT = (PIMAGE_NT_HEADERS)pNTHeader32;
+    else
+        pNT = (PIMAGE_NT_HEADERS)pNTHeader64;
+
+	// NewBase valid ?
+	if (NewBase & 0xFFFF)
+	{
+		DoOutputDebugString("reBasePEImage: Error, invalid image base 0x%p.\n", NewBase);
+        return FALSE;
+	}
+
+	if (pNT->OptionalHeader.ImageBase == NewBase)
+	{
+		DoOutputDebugString("reBasePEImage: Error, image base already 0x%p.\n", NewBase);
+        return FALSE;
+	}
+
+	if (!pNT->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress)
+	{
+		DoOutputDebugString("reBasePEImage: Image has no relocation sextion.\n");
+        return FALSE;
+	}
+
+	pR = (PIMAGE_RELOCATION)(NewBase + pNT->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].VirtualAddress);
+//#ifdef DEBUG_COMMENTS
+    DoOutputDebugString("reBasePEImage: pR set to 0x%p.\n", pR);
+//#endif
+
+    pW = (WORD*)((DWORD_PTR)pR + 8);
+
+	// add delta to relocation items
+	dwDelta = NewBase - pNT->OptionalHeader.ImageBase;
+//#ifdef DEBUG_COMMENTS
+    DoOutputDebugString("reBasePEImage: dwDelta set to 0x%x.\n", dwDelta);
+//#endif
+
+	__try
+	{
+		do
+		{
+			// get number of items
+			if (pR->SymbolTableIndex)
+            {
+				iItems = (pR->SymbolTableIndex - 8) / 2;
+//#ifdef DEBUG_COMMENTS
+                DoOutputDebugString("reBasePEImage: Items in block %d: %d.\n", *pW, iItems);
+//#endif
+            }
+			else
+            {
+//#ifdef DEBUG_COMMENTS
+                DoOutputDebugString("reBasePEImage: Block %d has no items.\n", *pW);
+//#endif
+				break; // no items in this block
+            }
+
+			// trace/list block items...
+			pW = (WORD*)((DWORD_PTR)pR + 8);
+
+			for (i = 0; i < iItems; i++)
+			{
+				dwRva  = (*pW & 0xFFF) + pR->VirtualAddress;
+
+				if (!dwRva)
+                    return FALSE;
+
+                dwType = *pW >> 12;
+
+				if (dwType != 0) // fully compatible ???
+				{
+					// add delta
+					//pdwAddr = (PDWORD)ImageRvaToVa(
+					//	pNT,
+					//	pPE,
+					//	dwRva,
+					//	NULL);
+                    pdwAddr = (PDWORD)(NewBase + dwRva);
+					*pdwAddr += dwDelta;
+//#ifdef DEBUG_COMMENTS
+                    DoOutputDebugString("reBasePEImage: Item %d pdwAddr 0x%p updated to 0x%p.\n", pW, pdwAddr, *pdwAddr);
+//#endif                    
+				}
+				// next item
+				++pW;
+			}
+
+			pR = (PIMAGE_RELOCATION)pW; // pR -> next block header
+		} while ( *(DWORD*)pW );
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		DoOutputDebugString("reBasePEImage: Exception rebasing image at 0x%p.\n", NewBase);
+        return FALSE;
+	}
+
+	pNT->OptionalHeader.ImageBase = NewBase;
+
+	return TRUE;
+}
+
 void PeParser::fixPeHeader()
 {
 	DWORD dwSize = pDosHeader->e_lfanew + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER);
@@ -1504,11 +1633,19 @@ void PeParser::fixPeHeader()
 
 //		if (moduleBaseAddress && moduleBaseAddress != pNTHeader32->OptionalHeader.ImageBase)
 //		{
-//			pNTHeader32->OptionalHeader.ImageBase = (DWORD)moduleBaseAddress;
+//			if (reBasePEImage(moduleBaseAddress))
+//            {
 //#ifdef DEBUG_COMMENTS
-//            DoOutputDebugString("fixPeHeader: ImageBase set to 0x%x.\n", pNTHeader32->OptionalHeader.ImageBase);
+//                DoOutputDebugString("fixPeHeader: Image relocated back to header image base 0x%p.\n", pNTHeader32->OptionalHeader.ImageBase);
 //#endif
+//            }
+//            else
+//                DoOutputDebugString("fixPeHeader: Failed to relocate image back to header image base 0x%p.\n", pNTHeader32->OptionalHeader.ImageBase);
 //		}
+//#ifdef DEBUG_COMMENTS
+//        else
+//            DoOutputDebugString("fixPeHeader: No relocation needed (image base 0x%p, header 0x%p.\n", pNTHeader32->OptionalHeader.ImageBase, moduleBaseAddress);
+//#endif
 	}
 	else
 	{
@@ -1628,80 +1765,7 @@ void PeParser::alignAllSectionHeaders()
 		listPeSection[i].sectionHeader.SizeOfRawData = alignValue(listPeSection[i].dataSize, fileAlignment);
         
         newFileSize = listPeSection[i].sectionHeader.PointerToRawData + listPeSection[i].sectionHeader.SizeOfRawData;
-    }
-    
-	for (WORD i = 0; i < NumberOfSections; i++)
-	{
-		if (i < NumberOfSections - 1)
-        {
-            
-            if ((listPeSection[i].sectionHeader.Misc.VirtualSize) > (listPeSection[i+1].sectionHeader.VirtualAddress - listPeSection[i].sectionHeader.VirtualAddress))
-            {
-                listPeSection[i].sectionHeader.Misc.VirtualSize = alignValue(listPeSection[i+1].sectionHeader.VirtualAddress - listPeSection[i].sectionHeader.VirtualAddress, sectionAlignment);
-#ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::alignAllSectionHeaders: Correcting VirtualSize for last section (%d) from 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize, alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment));
-#endif
-            }
-            else
-            {
-                listPeSection[i].sectionHeader.Misc.VirtualSize = alignValue(listPeSection[i].sectionHeader.Misc.VirtualSize, sectionAlignment);
-#ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::alignAllSectionHeaders: VirtualSize for section %d ok: 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
-#endif
-            }
-
-            if (i)
-            {
-                DWORD EndOfPreviousSection = alignValue(listPeSection[i-1].sectionHeader.VirtualAddress + listPeSection[i-1].sectionHeader.Misc.VirtualSize, sectionAlignment);
-            
-                if (listPeSection[i].sectionHeader.VirtualAddress && (listPeSection[i].sectionHeader.VirtualAddress != EndOfPreviousSection))
-                {
-#ifdef DEBUG_COMMENTS
-                    DoOutputDebugString("PeParser::alignAllSectionHeaders: Correcting VirtualAddress for section %d from: 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.VirtualAddress, EndOfPreviousSection);
-#endif
-                    listPeSection[i].sectionHeader.VirtualAddress = EndOfPreviousSection;
-                }
-            }
-        }
-        else 
-        {
-            if ((listPeSection[i].sectionHeader.Misc.VirtualSize) > alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment))
-            {
-#ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::alignAllSectionHeaders: Correcting VirtualSize for last section (%d) from 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize, alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment));
-#endif
-                listPeSection[i].sectionHeader.Misc.VirtualSize = alignValue(listPeSection[i].sectionHeader.SizeOfRawData, sectionAlignment);
-            }
-            else
-            {
-                listPeSection[i].sectionHeader.Misc.VirtualSize = alignValue(listPeSection[i].sectionHeader.Misc.VirtualSize, sectionAlignment);            
-#ifdef DEBUG_COMMENTS
-                DoOutputDebugString("PeParser::alignAllSectionHeaders: VirtualSize for last section (%d) ok: 0x%x.\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
-#endif
-            }
-
-            if (i)
-            {
-                DWORD EndOfPreviousSection = alignValue(listPeSection[i-1].sectionHeader.VirtualAddress + listPeSection[i-1].sectionHeader.Misc.VirtualSize, sectionAlignment);
-            
-                if (listPeSection[i].sectionHeader.VirtualAddress && (listPeSection[i].sectionHeader.VirtualAddress != EndOfPreviousSection))
-                {
-#ifdef DEBUG_COMMENTS
-                    DoOutputDebugString("PeParser::alignAllSectionHeaders: Correcting VirtualAddress for last section (%d) from: 0x%x to 0x%x.\n", i+1, listPeSection[i].sectionHeader.VirtualAddress, EndOfPreviousSection);
-#endif
-                    listPeSection[i].sectionHeader.VirtualAddress = EndOfPreviousSection;
-                }
-            }
-        }
-
-        if (listPeSection[i].sectionHeader.Misc.VirtualSize > SIZE_LIMIT)
-        {
-            DoOutputDebugString("PeParser::alignAllSectionHeaders: Section %d size too big: 0x%x\n", i+1, listPeSection[i].sectionHeader.Misc.VirtualSize);
-			//return;
-        }        
-	}
-
-	std::sort(listPeSection.begin(), listPeSection.end(), PeFileSectionSortByVirtualAddress); //sort by VirtualAddress ascending
+    }    
 }
 
 bool PeParser::dumpProcess(DWORD_PTR modBase, DWORD_PTR entryPoint, const CHAR * dumpFilePath)

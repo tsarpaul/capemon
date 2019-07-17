@@ -19,6 +19,10 @@ extern HMODULE s_hInst;
 extern WCHAR s_wzDllPath[MAX_PATH];
 extern CHAR s_szDllPath[MAX_PATH];
 
+#define PE_MAX_SIZE     ((ULONG)0x77000000)
+#define PE_MIN_SIZE     ((ULONG)0x1000)
+#define PE_MAX_SECTIONS 0xFFFF
+
 //Global debugger switch
 #define DEBUGGER_ENABLED 1
 
@@ -26,11 +30,17 @@ PVOID GetHookCallerBase();
 BOOL InsideHook(LPVOID* ReturnAddress, LPVOID Address);
 PVOID GetPageAddress(PVOID Address);
 PVOID GetAllocationBase(PVOID Address);
+SIZE_T GetAllocationSize(PVOID Address);
+BOOL TestPERequirements(PIMAGE_NT_HEADERS pNtHeader);
+SIZE_T GetMinPESize(PIMAGE_NT_HEADERS pNtHeader);
+double GetEntropy(PUCHAR Buffer);
 BOOL TranslatePathFromDeviceToLetter(__in TCHAR *DeviceFilePath, __out TCHAR* DriveLetterFilePath, __inout LPDWORD lpdwBufferSize);
+DWORD GetEntryPoint(LPVOID Address);
 BOOL DumpPEsInRange(LPVOID Buffer, SIZE_T Size);
 BOOL DumpRegion(PVOID Address);
 int DumpMemory(LPVOID Buffer, SIZE_T Size);
 int DumpCurrentProcessNewEP(LPVOID NewEP);
+int DumpCurrentProcessFixImports(LPVOID NewEP);
 int DumpCurrentProcess();
 int DumpProcess(HANDLE hProcess, LPVOID ImageBase);
 int DumpPE(LPVOID Buffer);
@@ -41,6 +51,7 @@ int ScanForDisguisedPE(LPVOID Buffer, SIZE_T Size, LPVOID* Offset);
 int IsDisguisedPEHeader(LPVOID Buffer);
 int DumpImageInCurrentProcess(LPVOID ImageBase);
 void DumpSectionViewsForPid(DWORD Pid);
+BOOL DumpStackRegion(void);
 
 SYSTEM_INFO SystemInfo;
 PVOID CallingModule;
@@ -101,6 +112,7 @@ struct InjectionSectionView *SectionViewList;
 //
 #define STATUS_BAD_COMPRESSION_BUFFER    ((NTSTATUS)0xC0000242L)
 
+#define	DOS_HEADER_LIMIT    0x100	// Max range for acceptable DOS header within candidate buffer
 #define	PE_HEADER_LIMIT		0x200	// Range to look for PE header within candidate buffer
 
 #define SIZE_OF_LARGEST_IMAGE ((ULONG)0x77000000)
@@ -155,7 +167,9 @@ enum {
     CERBER_CONFIG           = 0x30,
     CERBER_PAYLOAD          = 0x31,
 
-    DATADUMP                = 0x66
+    DATADUMP                = 0x66,
+    
+    STACK_REGION            = 0x6c
 };
 
 HANDLE EvilGrabRegHandle;

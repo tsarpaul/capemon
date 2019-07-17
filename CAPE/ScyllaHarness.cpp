@@ -179,7 +179,7 @@ extern "C" int ScyllaDumpProcess(HANDLE hProcess, DWORD_PTR ModuleBase, DWORD_PT
 
         SectionBasedSizeOfImage = (SIZE_T)peFile->getSectionHeaderBasedSizeOfImage();
 
-        if ((SIZE_T)entrypoint >= SectionBasedSizeOfImage)
+        if (SectionBasedSizeOfImage && (SIZE_T)entrypoint >= SectionBasedSizeOfImage)
         {
             DoOutputDebugString("DumpProcess: Error - entry point too big: 0x%x, ignoring.\n", entrypoint);
             entrypoint = NULL;
@@ -651,13 +651,14 @@ extern "C" int ScyllaDumpCurrentProcessFixImports(DWORD_PTR NewOEP)
     BOOL IAT_Found, AdvancedIATSearch = FALSE;
     bool isAfter;
     DWORD_PTR ModuleBase;
+	SIZE_T SectionBasedSizeOfImage;
 
     IATSearch iatSearch;
 	ApiReader apiReader;
 	IATReferenceScan iatReferenceScan;
 	ImportsHandling importsHandling;
 
-	DWORD_PTR entrypointRVA = 0;
+	DWORD_PTR entrypoint = 0;
 	PeParser * peFile = 0;
 
     ModuleBase = (DWORD)(ULONG_PTR)GetModuleHandle(NULL);
@@ -687,24 +688,41 @@ extern "C" int ScyllaDumpCurrentProcessFixImports(DWORD_PTR NewOEP)
     if (peFile->isValidPeFile())
     {
         if (NewOEP)
-            entrypointRVA = NewOEP - ModuleBase;
+            entrypoint = NewOEP;
         else
-            entrypointRVA = peFile->getEntryPoint();
+            entrypoint = peFile->getEntryPoint();
 
-        DoOutputDebugString(TEXT("DumpCurrentProcessFixImports: Module entry point VA is 0x%p"), ModuleBase + entrypointRVA);
+        SectionBasedSizeOfImage = (SIZE_T)peFile->getSectionHeaderBasedSizeOfImage();
+
+        if ((SIZE_T)entrypoint >= SectionBasedSizeOfImage)
+        {
+            DoOutputDebugString("DumpProcess: Error - entry point too big: 0x%x, ignoring.\n", entrypoint);
+            entrypoint = NULL;
+        }
+        else
+        {
+            DoOutputDebugString("DumpCurrentProcessFixImports: Module entry point VA is 0x%p.\n", entrypoint);
+            entrypoint = entrypoint + (DWORD_PTR)ModuleBase;
+        }
 
         //  Let's dump then fix the dump on disk
-        if (peFile->dumpProcess(ModuleBase, ModuleBase + entrypointRVA, CAPE_OUTPUT_FILE))
+        if (peFile->dumpProcess(ModuleBase, entrypoint, NULL))
         {
             DoOutputDebugString("DumpCurrentProcessFixImports: Module image dump success %s", CapeOutputPath);
         }
+        else
+        {
+            DoOutputDebugString("DumpCurrentProcessFixImports: Error - Cannot dump image.\n");
+            delete peFile;
+            return 0;
+        }
 
         //  IAT search - we'll try the simple search first
-        IAT_Found = iatSearch.searchImportAddressTableInProcess(ModuleBase + entrypointRVA, (DWORD_PTR*)&addressIAT, &sizeIAT, FALSE);
+        IAT_Found = iatSearch.searchImportAddressTableInProcess(ModuleBase + entrypoint, (DWORD_PTR*)&addressIAT, &sizeIAT, FALSE);
 
         //  Let's try the advanced search now
         if (IAT_Found == FALSE)
-            IAT_Found = iatSearch.searchImportAddressTableInProcess(ModuleBase + entrypointRVA, (DWORD_PTR*)&addressIAT, &sizeIAT, TRUE);
+            IAT_Found = iatSearch.searchImportAddressTableInProcess(ModuleBase + entrypoint, (DWORD_PTR*)&addressIAT, &sizeIAT, TRUE);
 
         if (addressIAT && sizeIAT)
         {
@@ -795,10 +813,7 @@ extern "C" int ScyllaDumpCurrentProcessFixImports(DWORD_PTR NewOEP)
             }
         }
         else
-        {
-            DoOutputDebugString("DumpCurrentProcessFixImports: Warning - Unable to find IAT in scan.\n");
-        }
-
+            DoOutputDebugString("DumpCurrentProcessFixImports: Warning - Unable to find IAT in scan, import reconstruction failed.\n");
     }
     else
     {

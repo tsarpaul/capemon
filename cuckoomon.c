@@ -372,15 +372,15 @@ static hook_t g_hooks[] = {
 	//
     // Misc Hooks
     //
+
+    // for debugging only
+	//HOOK(kernel32, GetLastError),
 #ifndef _WIN64
 	HOOK(ntdll, memcpy),
 #endif
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
-
-	// for debugging only
-	//HOOK(kernel32, GetLastError),
-
+    HOOK(user32, ChangeWindowMessageFilter),
 	HOOK(user32, SetWindowsHookExA),
     HOOK(user32, SetWindowsHookExW),
     HOOK(user32, UnhookWindowsHookEx),
@@ -622,6 +622,8 @@ static hook_t g_hooks[] = {
 	HOOK(advapi32, CryptCreateHash),
 	HOOK(advapi32, CryptEnumProvidersA),
 	HOOK(advapi32, CryptEnumProvidersW),
+	HOOK(advapi32, QueryUsersOnEncryptedFile),
+	HOOK(advapi32, CryptGenRandom),
 
 	HOOK(wintrust, HTTPSCertificateTrust),
 	HOOK(wintrust, HTTPSFinalProv),
@@ -648,6 +650,10 @@ static hook_t g_hooks[] = {
 	HOOK(cryptsp, CryptCreateHash),
 	HOOK(cryptsp, CryptEnumProvidersA),
 	HOOK(cryptsp, CryptEnumProvidersW),
+	HOOK(cryptsp, CryptHashSessionKey),
+	HOOK(cryptsp, CryptGenRandom),
+
+	HOOK(vbe7, rtcEnvironBstr),
 };
 
 void set_hooks_dll(const wchar_t *library)

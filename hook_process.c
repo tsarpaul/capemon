@@ -29,6 +29,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "config.h"
 #ifdef CAPE_EXTRACTION
 #include "CAPE\Debugger.h"
+#include "CAPE\Extraction.h"
 #endif
 
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
@@ -40,13 +41,6 @@ extern void ResumeProcessHandler(HANDLE ProcessHandle, DWORD Pid);
 extern void UnmapSectionViewHandler(PVOID BaseAddress);
 extern void MapSectionViewHandler(HANDLE ProcessHandle, HANDLE SectionHandle, PVOID BaseAddress, SIZE_T ViewSize);
 extern void WriteMemoryHandler(HANDLE ProcessHandle, LPVOID BaseAddress, LPCVOID Buffer, SIZE_T NumberOfBytesWritten);
-#endif
-#ifdef CAPE_EXTRACTION
-extern struct TrackedRegion *TrackedRegionList;
-extern void AllocationHandler(PVOID BaseAddress, SIZE_T RegionSize, ULONG AllocationType, ULONG Protect);
-extern void ProtectionHandler(PVOID BaseAddress, SIZE_T RegionSize, ULONG Protect, ULONG OldProtect);
-extern void FreeHandler(PVOID BaseAddress);
-extern void ProcessTrackedRegion();
 #endif
 
 extern void file_handle_terminate();
@@ -416,33 +410,28 @@ HOOKDEF(NTSTATUS, WINAPI, NtTerminateProcess,
 	// Process will terminate. Default logging will not work. Be aware: return value not valid
     NTSTATUS ret = 0;
 	lasterror_t lasterror;
-
 	get_lasterrors(&lasterror);
-	if (ProcessHandle == NULL) {
+
+#ifdef CAPE_EXTRACTION
+    DoOutputDebugString("NtTerminateProcess hook: Processing tracked regions before shutdown (process %d).\n", GetCurrentProcessId());
+    ProcessTrackedRegions();
+    ClearAllBreakpoints();
+#endif
+    if (g_config.procdump && !ProcessDumped)
+    {
+        DoOutputDebugString("NtTerminateProcess hook: Attempting to dump process %d\n", GetCurrentProcessId());
+        DoProcessDump(GetHookCallerBase());
+    }
+
+    if (ProcessHandle == NULL) {
 		// we mark this here as this termination type will kill all threads but ours, including
 		// the logging thread.  By setting this, we'll switch into a direct logging mode
 		// for the subsequent call to NtTerminateProcess against our own process handle
-#ifdef CAPE_EXTRACTION
-        ProcessTrackedRegion();
-#endif
-        if (g_config.procdump && !ProcessDumped)
-        {
-            DoOutputDebugString("NtTerminateProcess hook: Attempting to dump process %d\n", GetCurrentProcessId());
-            DoProcessDump(GetHookCallerBase());
-        }
 		process_shutting_down = 1;
 		LOQ_ntstatus("process", "ph", "ProcessHandle", ProcessHandle, "ExitCode", ExitStatus);
         file_handle_terminate();
 	}
 	else if (GetCurrentProcessId() == our_getprocessid(ProcessHandle)) {
-#ifdef CAPE_EXTRACTION
-        ProcessTrackedRegion();
-#endif
-        if (g_config.procdump && !ProcessDumped)
-        {
-            DoOutputDebugString("NtTerminateProcess hook: Attempting to dump process %d\n", GetCurrentProcessId());
-            DoProcessDump(GetHookCallerBase());
-        }
 		process_shutting_down = 1;
 		LOQ_ntstatus("process", "ph", "ProcessHandle", ProcessHandle, "ExitCode", ExitStatus);
 		pipe("KILL:%d", GetCurrentProcessId());
@@ -570,7 +559,7 @@ HOOKDEF(NTSTATUS, WINAPI, NtMapViewOfSection,
         MapSectionViewHandler(ProcessHandle, SectionHandle, *BaseAddress, *ViewSize);
 #endif
 #ifdef CAPE_EXTRACTION
-        MapSectionViewHandler(*BaseAddress, *ViewSize, Win32Protect);
+        //MapSectionViewHandler(*BaseAddress, *ViewSize, Win32Protect);
 #endif
         if (pid != GetCurrentProcessId()) {
 			pipe("PROCESS:%d:%d", is_suspended(pid, 0), pid);
@@ -887,7 +876,7 @@ HOOKDEF(NTSTATUS, WINAPI, NtFreeVirtualMemory,
     IN      ULONG FreeType
 ) {
 #ifdef CAPE_EXTRACTION
-    if (!called_by_hook() && GetCurrentProcessId() == our_getprocessid(ProcessHandle) && *RegionSize == 0 && (FreeType & MEM_RELEASE))
+    if (!called_by_hook() && GetCurrentProcessId() == our_getprocessid(ProcessHandle) && (FreeType & MEM_RELEASE))
         FreeHandler(*BaseAddress);
 #endif
 
@@ -975,6 +964,7 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 	__in PEXCEPTION_RECORD ExceptionRecord,
 	__in PCONTEXT Context)
 {
+    BOOL RetVal;
 #ifndef _WIN64
 	if (ExceptionRecord && ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && ExceptionRecord->ExceptionFlags == 0 &&
 		ExceptionRecord->NumberParameters == 2 && ExceptionRecord->ExceptionInformation[0] == 1) {
@@ -1005,7 +995,27 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 	// flush logs prior to handling of an exception without having to register a vectored exception handler
 	log_flush();
 
-	return Old_RtlDispatchException(ExceptionRecord, Context);
+    struct _EXCEPTION_POINTERS ExceptionInfo;
+    ExceptionInfo.ExceptionRecord = ExceptionRecord;
+    ExceptionInfo.ContextRecord = Context;
+    if (CAPEExceptionFilter(&ExceptionInfo) == EXCEPTION_CONTINUE_EXECUTION)
+        return 1;
+    else
+        RetVal = Old_RtlDispatchException(ExceptionRecord, Context);
+
+    if (!RetVal && ExceptionRecord) {
+        if (ExceptionRecord->NumberParameters == 1) {
+            DoOutputDebugString("RtlDispatchException: Unhandled exception! Address 0x%p, code 0x%x, flags 0x%x, parameter 0x%x.\n", ExceptionRecord->ExceptionAddress, ExceptionRecord->ExceptionCode, ExceptionRecord->ExceptionFlags, ExceptionRecord->ExceptionInformation[0]);
+        }
+        else if (ExceptionRecord->NumberParameters == 2) {
+            DoOutputDebugString("RtlDispatchException: Unhandled exception! Address 0x%p, code 0x%x, flags 0x%x, parameters 0x%x and 0x%x.\n", ExceptionRecord->ExceptionAddress, ExceptionRecord->ExceptionCode, ExceptionRecord->ExceptionFlags, ExceptionRecord->ExceptionInformation[0], ExceptionRecord->ExceptionInformation[1]);
+        }
+        else {
+            DoOutputDebugString("RtlDispatchException: Unhandled exception! Address 0x%p, code 0x%x, flags 0x%x, %d parameters: 0x%x, 0x%x & ...\n", ExceptionRecord->ExceptionAddress, ExceptionRecord->ExceptionCode, ExceptionRecord->ExceptionFlags, ExceptionRecord->NumberParameters, ExceptionRecord->ExceptionInformation[0], ExceptionRecord->ExceptionInformation[1]);
+        }
+    }
+
+    return RetVal;
 }
 
 HOOKDEF_NOTAIL(WINAPI, NtRaiseException,

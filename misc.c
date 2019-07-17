@@ -1833,14 +1833,19 @@ void register_dll_notification_manually(PLDR_DLL_NOTIFICATION_FUNCTION notify)
 
 unsigned int address_is_in_stack(PVOID Address)
 {
+    if (!Address)
+        return 0;
+
     __try {
         PNT_TIB pTib = (PNT_TIB)(NtCurrentTeb());
 
-        if ((Address < pTib->StackBase) && (Address > pTib->StackLimit))
-            DoOutputDebugString("Address 0x%p within stack base = 0x%p, limit = 0x%p\r\n", Address, pTib->StackBase, pTib->StackLimit);
-            return 1;
+        if (!pTib->StackBase || !pTib->StackLimit)
+            return 0;
 
-        DoOutputDebugString("Address 0x%x not within stack base = 0x%p, limit = 0x%p\r\n", Address, pTib->StackBase, pTib->StackLimit);
+        if ((Address < pTib->StackBase) && (Address > pTib->StackLimit)) {
+            return 1;
+        }
+
         return 0;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {

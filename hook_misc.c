@@ -105,29 +105,29 @@ HOOKDEF(PVOID, WINAPI, RtlAddVectoredExceptionHandler,
 ) {
 	PVOID ret = 0;
 
-    if (DEBUGGER_ENABLED && VECTORED_HANDLER && First)
-    {
-        if (!CAPEExceptionFilterHandle)
-        {
-            DoOutputDebugString("RtlAddVectoredExceptionHandler hook: Error - CAPE vectored handler not registered.\n");
-            ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
-            LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
-            return ret;
-        }
-
-        // We register the handler at the bottom, this minimizes
-        // our interference and means the handle is valid
-        ret = Old_RtlAddVectoredExceptionHandler(0, Handler);
-
-        if (ret == NULL)
-            return ret;
-
-        // We record the handler address so that
-        // CAPEExceptionFilter can call it directly
-        DoOutputDebugString("RtlAddVectoredExceptionHandler hook: CAPE vectored handler protected as First.\n");
-        SampleVectoredHandler = (SAMPLE_HANDLER)Handler;
-    }
-    else
+    //if (DEBUGGER_ENABLED && VECTORED_HANDLER && First)
+    //{
+    //    if (!CAPEExceptionFilterHandle)
+    //    {
+    //        DoOutputDebugString("RtlAddVectoredExceptionHandler hook: Error - CAPE vectored handler not registered.\n");
+    //        ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
+    //        LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
+    //        return ret;
+    //    }
+    //
+    //    // We register the handler at the bottom, this minimizes
+    //    // our interference and means the handle is valid
+    //    ret = Old_RtlAddVectoredExceptionHandler(0, Handler);
+    //
+    //    if (ret == NULL)
+    //        return ret;
+    //
+    //    // We record the handler address so that
+    //    // CAPEExceptionFilter can call it directly
+    //    DoOutputDebugString("RtlAddVectoredExceptionHandler hook: CAPE vectored handler protected as First.\n");
+    //    SampleVectoredHandler = (SAMPLE_HANDLER)Handler;
+    //}
+    //else
         ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
 
     LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
@@ -1473,4 +1473,34 @@ HOOKDEF(VOID, WINAPI, LocalFree,
 	int ret = 0;
 	Old_LocalFree(hMem);
 	LOQ_void("misc", "p", "SourceBuffer", hMem);
+}
+
+#define MSGFLT_ADD 1
+#define MSGFLT_REMOVE 2
+HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+  UINT  message,
+  DWORD dwFlag
+)
+{
+	BOOL ret;
+    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD) {
+        ret = FALSE;
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    else
+        ret = Old_ChangeWindowMessageFilter(message, dwFlag);
+	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
+	return ret;
+}
+
+HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+)
+{
+	LPWSTR ret = Old_rtcEnvironBstr(es);
+	LOQ_bool("misc", "uu", "EnvVar", es->envstr, "EnvStr", ret);
+	if (ret && !wcsicmp(es->envstr, L"userdomain"))
+        // replace first char so it differs from computername
+        *ret = '#';
+	return ret;
 }

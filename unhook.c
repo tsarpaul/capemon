@@ -32,6 +32,10 @@ extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern void file_handle_terminate();
 extern int DoProcessDump(PVOID CallerBase);
 extern BOOL ProcessDumped;
+#ifdef CAPE_EXTRACTION
+extern void ClearAllBreakpoints();
+extern void ProcessTrackedRegions();
+#endif
 
 static HANDLE g_unhook_thread_handle, g_watcher_thread_handle;
 
@@ -130,7 +134,7 @@ void invalidate_regions_for_hook(const hook_t *hook)
 void restore_hooks_on_range(ULONG_PTR start, ULONG_PTR end)
 {
 	lasterror_t lasterror;
-	uint32_t idx;
+    uint32_t idx;
 
 	get_lasterrors(&lasterror);
 
@@ -254,14 +258,35 @@ static DWORD WINAPI _terminate_event_thread(LPVOID param)
 {
 	hook_disable();
 
+    DWORD ProcessId = GetCurrentProcessId();
+
     WaitForSingleObject(g_terminate_event_handle, INFINITE);
 
-    if (g_config.procdump && !ProcessDumped) {
-        DoOutputDebugString("Terminate Event: Attempting to dump process %d\n", GetCurrentProcessId());
-        DoProcessDump(NULL);
-    }
+    CloseHandle(g_terminate_event_handle);
 
+    if (g_config.procdump) {
+        if (!ProcessDumped) {
+            DoOutputDebugString("Terminate Event: Attempting to dump process %d\n", ProcessId);
+            DoProcessDump(NULL);
+        }
+        else
+            DoOutputDebugString("Terminate Event: Process %d has already been dumped(!)\n", ProcessId);
+    }
+#ifdef CAPE_EXTRACTION
+    DoOutputDebugString("Terminate Event: Processing tracked regions before shutdown (process %d).\n", ProcessId);
+    ProcessTrackedRegions();
+    ClearAllBreakpoints();
+#else
+    else
+        DoOutputDebugString("Terminate Event: Skipping dump of process %d\n", ProcessId);
+#endif
     file_handle_terminate();
+    g_terminate_event_handle = OpenEventA(EVENT_MODIFY_STATE, FALSE, g_config.terminate_event_name);
+    if (g_terminate_event_handle) {
+        SetEvent(g_terminate_event_handle);
+        CloseHandle(g_terminate_event_handle);
+    }
+    DoOutputDebugString("Terminate Event: CAPE shutdown complete for process %d\n", ProcessId);
     log_flush();
     if (g_config.terminate_processes)
         ExitProcess(0);
