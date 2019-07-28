@@ -990,7 +990,6 @@ void ProcessTrackedRegions()
 
     while (TrackedRegion && TrackedRegion->AllocationBase && TrackedRegion->RegionSize)
     {
-        DoOutputDebugString("ProcessTrackedRegions: debug info: Address 0x%p Size 0x%x.\n", TrackedRegion->AllocationBase, TrackedRegion->RegionSize);
         if (TrackedRegion->AllocationBase == GetModuleHandle(NULL))
             ProcessImageBase(TrackedRegion);
         else
