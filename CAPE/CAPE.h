@@ -73,7 +73,7 @@ PVOID CallingModule;
 
 #define PLUGX_SIGNATURE		0x5658	// 'XV'
 
-typedef struct CapeMetadata 
+typedef struct CapeMetadata
 {
 	char*	ProcessPath;
 	char*	ModulePath;
@@ -91,27 +91,27 @@ BOOL SetCapeMetaData(DWORD DumpType, DWORD TargetPid, HANDLE hTargetProcess, PVO
 
 enum {
     PROCDUMP                = 0,
-    
+
     COMPRESSION             = 1,
-    
+
     INJECTION_PE            = 3,
     INJECTION_SHELLCODE     = 4,
     //INJECTION_RUNPE         = 5,
 
     EXTRACTION_PE           = 8,
     EXTRACTION_SHELLCODE    = 9,
-    
+
     PLUGX_PAYLOAD           = 0x10,
     PLUGX_CONFIG            = 0x11,
-    
+
     EVILGRAB_PAYLOAD        = 0x14,
     EVILGRAB_DATA           = 0x15,
-    
+
     SEDRECO_DATA            = 0x20,
-    
+
     URSNIF_CONFIG           = 0x24,
     URSNIF_PAYLOAD          = 0x25,
-	
+
     CERBER_CONFIG           = 0x30,
     CERBER_PAYLOAD          = 0x31,
 

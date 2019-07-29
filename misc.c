@@ -518,7 +518,7 @@ DWORD pid_from_process_handle(HANDLE process_handle)
 	
 	duped = DuplicateHandle(GetCurrentProcess(), process_handle, GetCurrentProcess(), &dup_handle, PROCESS_QUERY_INFORMATION, FALSE, 0);
 
-    if (pNtQueryInformationProcess(dup_handle, 0, &pbi, sizeof(pbi), &ulSize) >= 0 && ulSize == sizeof(pbi))
+    if(pNtQueryInformationProcess(dup_handle, 0, &pbi, sizeof(pbi), &ulSize) >= 0 && ulSize == sizeof(pbi))
         PID = (DWORD)pbi.UniqueProcessId;
 
 	if (duped)
@@ -685,10 +685,10 @@ char *convert_address_to_dll_name_and_offset(ULONG_PTR addr, unsigned int *offse
 
 	if (addr >= g_our_dll_base && addr < (g_our_dll_base + g_our_dll_size))
 	{
-		char *buf = calloc(1, strlen("cuckoomon.dll") + 1);
+		char *buf = calloc(1, strlen("capemon.dll") + 1);
 		if (buf == NULL)
 			return NULL;
-		strcpy(buf, "cuckoomon.dll");
+		strcpy(buf, "capemon.dll");
 		*offset = (unsigned int)(addr - g_our_dll_base);
 		return buf;
 	}

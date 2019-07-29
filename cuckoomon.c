@@ -30,12 +30,15 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "config.h"
 #include "unhook.h"
 #include "bson.h"
+#include "Shlwapi.h"
 
 struct _g_config g_config;
-wchar_t *our_process_path;
+char *our_process_path;
+char *our_dll_path;
+wchar_t *our_process_path_w;
+wchar_t *our_dll_path_w;
 wchar_t *our_commandline;
 BOOL is_64bit_os;
-
 volatile int dummy_val;
 
 extern void init_CAPE();
@@ -372,15 +375,15 @@ static hook_t g_hooks[] = {
 	//
     // Misc Hooks
     //
+
+    // for debugging only
+	//HOOK(kernel32, GetLastError),
 #ifndef _WIN64
 	HOOK(ntdll, memcpy),
 #endif
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
-
-	// for debugging only
-	//HOOK(kernel32, GetLastError),
-
+    HOOK(user32, ChangeWindowMessageFilter),
 	HOOK(user32, SetWindowsHookExA),
     HOOK(user32, SetWindowsHookExW),
     HOOK(user32, UnhookWindowsHookEx),
@@ -622,6 +625,9 @@ static hook_t g_hooks[] = {
 	HOOK(advapi32, CryptCreateHash),
 	HOOK(advapi32, CryptEnumProvidersA),
 	HOOK(advapi32, CryptEnumProvidersW),
+	HOOK(advapi32, QueryUsersOnEncryptedFile),
+	HOOK(advapi32, CryptGenRandom),
+	HOOK(advapi32, CryptImportKey),
 
 	HOOK(wintrust, HTTPSCertificateTrust),
 	HOOK(wintrust, HTTPSFinalProv),
@@ -648,6 +654,11 @@ static hook_t g_hooks[] = {
 	HOOK(cryptsp, CryptCreateHash),
 	HOOK(cryptsp, CryptEnumProvidersA),
 	HOOK(cryptsp, CryptEnumProvidersW),
+	HOOK(cryptsp, CryptHashSessionKey),
+	HOOK(cryptsp, CryptGenRandom),
+	HOOK(cryptsp, CryptImportKey),
+
+	HOOK(vbe7, rtcEnvironBstr),
 };
 
 void set_hooks_dll(const wchar_t *library)
@@ -929,16 +940,35 @@ void get_our_process_path(void)
 {
 	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
 	wchar_t *tmp2 = calloc(1, 32768 * sizeof(wchar_t));
+    our_process_path = (char*)calloc(sizeof(char), MAX_PATH);
 
 	GetModuleFileNameW(NULL, tmp, 32768);
 
 	ensure_absolute_unicode_path(tmp2, tmp);
 
-	our_process_path = tmp2;
+	our_process_path_w = tmp2;
+
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path_w, (int)wcslen(our_process_path_w)+1, our_process_path, MAX_PATH, NULL, NULL);
 
 	free(tmp);
 }
 
+void get_our_dll_path(void)
+{
+	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
+	wchar_t *tmp2 = calloc(1, 32768 * sizeof(wchar_t));
+    our_dll_path = (char*)calloc(sizeof(char), MAX_PATH);
+
+	GetModuleFileNameW((HMODULE)g_our_dll_base, tmp, 32768);
+
+	ensure_absolute_unicode_path(tmp2, tmp);
+
+	our_dll_path_w = tmp2;
+
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_dll_path_w, (int)wcslen(our_dll_path_w)+1, our_dll_path, MAX_PATH, NULL, NULL);
+
+	free(tmp);
+}
 void get_our_commandline(void)
 {
 	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
@@ -1002,7 +1032,7 @@ OSVERSIONINFOA g_osverinfo;
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 {
-	char config_fname[MAX_PATH];
+	char config_fname[MAX_PATH], analyzer_path[MAX_PATH];
 	lasterror_t lasterror;
 
 	get_lasterrors(&lasterror);
@@ -1048,6 +1078,8 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 		file_init();
 		//ignored_threads_init();
 
+		get_our_dll_path();
+
 		get_our_process_path();
 
 		get_our_commandline();
@@ -1059,13 +1091,15 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 		if (!read_config())
 #if CUCKOODBG
 			;
+		else
+			DoOutputDebugString("Config loaded.\n");
 #else
 			// if we're not debugging, then failure to read the cuckoomon config should be a critical error
 			goto abort;
 #endif
 
 		// don't inject into our own binaries run out of the analyzer directory unless they're the first process (intended)
-		if (wcslen(g_config.w_analyzer) && !wcsnicmp(our_process_path, g_config.w_analyzer, wcslen(g_config.w_analyzer)) && !g_config.first_process)
+		if (wcslen(g_config.w_analyzer) && !wcsnicmp(our_process_path_w, g_config.w_analyzer, wcslen(g_config.w_analyzer)) && !g_config.first_process)
 			goto abort;
 
 		if (g_config.debug) {
@@ -1145,8 +1179,18 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 	return TRUE;
     
 abort:
+    // delete config file
+    strncpy(analyzer_path, our_dll_path, strlen(our_dll_path));
+    PathRemoveFileSpec(analyzer_path); // remove filename
+    PathRemoveFileSpec(analyzer_path); // remove dll folder
+    sprintf(config_fname, "%s\\%u.ini", analyzer_path, GetCurrentProcessId());
+	DeleteFileA(config_fname);
+
+    // backward compatibility
+    memset(config_fname, 0, sizeof(config_fname));
 	sprintf(config_fname, "C:\\%u.ini", GetCurrentProcessId());
 	DeleteFileA(config_fname);
+
 	set_lasterrors(&lasterror);
 	return FALSE;
 }

@@ -20,10 +20,12 @@ along with this program.If not, see <http://www.gnu.org/licenses/>.
 
 #define MAX_PRETRAMP_SIZE 320
 #define MAX_TRAMP_SIZE 128
+#define MAX_UNICODE_PATH 32768
 
-#define BUFSIZE 			1024	// For hashing
-#define DUMP_MAX            100
+#define BUFSIZE 			    1024	// For hashing
+#define DUMP_MAX                100
 #define CAPE_OUTPUT_FILE "CapeOutput.bin"
+#define SUSPENDED_THREAD_MAX    4096
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -37,12 +39,14 @@ along with this program.If not, see <http://www.gnu.org/licenses/>.
 #include <psapi.h>
 #include <string.h>
 #include <strsafe.h>
+#include <tlhelp32.h>
 
 #include "CAPE.h"
 #include "Debugger.h"
 #include "..\alloc.h"
 #include "..\pipe.h"
 #include "..\config.h"
+#include "..\lookup.h"
 
 #pragma comment(lib, "Shlwapi.lib")
 
@@ -102,6 +106,7 @@ typedef struct _hook_info_t {
 } hook_info_t;
 
 extern uint32_t path_from_handle(HANDLE handle, wchar_t *path, uint32_t path_buffer_len);
+extern wchar_t *ensure_absolute_unicode_path(wchar_t *out, const wchar_t *in);
 extern int called_by_hook(void);
 extern int operate_on_backtrace(ULONG_PTR _esp, ULONG_PTR _ebp, void *extra, int(*func)(void *, ULONG_PTR));
 extern unsigned int address_is_in_stack(PVOID Address);
@@ -111,6 +116,7 @@ extern wchar_t *our_process_path;
 extern wchar_t *our_commandline;
 extern ULONG_PTR g_our_dll_base;
 extern DWORD g_our_dll_size;
+extern lookup_t g_caller_regions;
 
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern void DoOutputErrorString(_In_ LPCTSTR lpOutputString, ...);
@@ -121,6 +127,8 @@ extern int ScyllaDumpProcess(HANDLE hProcess, DWORD_PTR modBase, DWORD_PTR NewOE
 extern int ScyllaDumpCurrentProcessFixImports(DWORD_PTR NewOEP);
 extern int ScyllaDumpProcessFixImports(HANDLE hProcess, DWORD_PTR modBase, DWORD_PTR NewOEP);
 extern int ScyllaDumpPE(DWORD_PTR Buffer);
+extern int ScyllaDumpPEToFileHandle(DWORD_PTR Buffer, HANDLE FileHandle);
+extern unsigned int ScyllaDumpProcessToFileHandle(HANDLE hProcess, DWORD_PTR ModuleBase, DWORD_PTR NewOEP, HANDLE FileHandle);
 extern BOOL CountDepth(LPVOID* ReturnAddress, LPVOID Address);
 extern SIZE_T GetPESize(PVOID Buffer);
 extern LPVOID GetReturnAddress(hook_info_t *hookinfo);
@@ -129,11 +137,9 @@ extern PVOID CallingModule;
 extern BOOL SetInitialBreakpoints(PVOID ImageBase);
 extern BOOL BreakpointsSet;
 #endif
-#ifdef CAPE_INJECTION
-extern void TerminateHandler();
-#endif
 
 BOOL ProcessDumped, FilesDumped, ModuleDumped;
+static PVOID ImageBase;
 static unsigned int DumpCount;
 
 static __inline ULONG_PTR get_stack_top(void)
@@ -153,6 +159,9 @@ static __inline ULONG_PTR get_stack_bottom(void)
 	return __readgsqword(0x10);
 #endif
 }
+
+CRITICAL_SECTION ProcessDumpCriticalSection;
+
 //**************************************************************************************
 BOOL InsideHook(LPVOID* ReturnAddress, LPVOID Address)
 //**************************************************************************************
@@ -322,7 +331,7 @@ PVOID GetAllocationBase(PVOID Address)
 
     if (!VirtualQuery(Address, &MemInfo, sizeof(MEMORY_BASIC_INFORMATION)))
     {
-        DoOutputErrorString("GetAllocationBase: unable to query memory address 0x%x", Address);
+        //DoOutputErrorString("GetAllocationBase: unable to query memory address 0x%x", Address);
         return 0;
     }
 
@@ -492,27 +501,61 @@ BOOL MapFile(HANDLE hFile, unsigned char **Buffer, DWORD* FileSize)
 }
 
 //**************************************************************************************
+char* GetResultsPath(char* FolderName)
+//**************************************************************************************
+{
+	char *FullPath;
+    DWORD RetVal;
+
+    FullPath = (char*)malloc(MAX_PATH);
+
+    if (FullPath == NULL)
+    {
+		DoOutputErrorString("GetResultsPath: Error allocating memory for full path string");
+		return 0;
+    }
+
+	// We want to dump output to the 'results' directory
+    memset(FullPath, 0, MAX_PATH);
+
+    strncpy_s(FullPath, MAX_PATH, g_config.results, strlen(g_config.results)+1);
+
+	if (strlen(FullPath) + 1 + strlen(FolderName) >= MAX_PATH)
+	{
+		DoOutputDebugString("GetResultsPath: Error, destination path too long.\n");
+        free(FullPath);
+		return 0;
+	}
+
+    PathAppend(FullPath, FolderName);
+
+	RetVal = CreateDirectory(FullPath, NULL);
+
+	if (RetVal == 0 && GetLastError() != ERROR_ALREADY_EXISTS)
+	{
+		DoOutputDebugString("GetResultsPath: Error creating output directory.\n");
+        free(FullPath);
+		return 0;
+	}
+
+	return FullPath;
+}
+
+//**************************************************************************************
 char* GetName()
 //**************************************************************************************
 {
-	char *OutputFilename, *FullPathName;
+	char *FullPathName,*OutputFilename;
     SYSTEMTIME Time;
-    DWORD RetVal;
     unsigned int random;
 
-    FullPathName = (char*) malloc(MAX_PATH);
-
-    if (FullPathName == NULL)
-    {
-		DoOutputErrorString("GetName: Error allocating memory for full path string");
-		return 0;
-    }
+	FullPathName = GetResultsPath("CAPE");
 
     OutputFilename = (char*)malloc(MAX_PATH);
 
     if (OutputFilename == NULL)
     {
-        DoOutputErrorString("GetName: failed to allocate memory for file name string");
+        DoOutputErrorString("DumpMemory: failed to allocate memory for file name string");
         return 0;
     }
 
@@ -520,38 +563,15 @@ char* GetName()
 
     if (rand_s(&random))
     {
-        DoOutputErrorString("GetName: failed to obtain a random number");
+        DoOutputErrorString("DumpMemory: failed to obtain a random number");
         return 0;
     }
 
     sprintf_s(OutputFilename, MAX_PATH*sizeof(char), "%d_%d%d%d%d%d%d%d%d", GetCurrentProcessId(), abs(random * Time.wMilliseconds), Time.wSecond, Time.wMinute, Time.wHour, Time.wDay, Time.wDayOfWeek, Time.wMonth, Time.wYear);
 
-	// We want to dump CAPE output to the 'analyzer' directory
-    memset(FullPathName, 0, MAX_PATH);
+	PathAppend(FullPathName, OutputFilename);
 
-    strncpy_s(FullPathName, MAX_PATH, g_config.analyzer, strlen(g_config.analyzer)+1);
-
-	if (strlen(FullPathName) + strlen("\\CAPE\\") + strlen(OutputFilename) >= MAX_PATH)
-	{
-		DoOutputDebugString("GetName: Error, CAPE destination path too long.");
-        free(OutputFilename);
-        free(FullPathName);
-		return 0;
-	}
-
-    PathAppend(FullPathName, "CAPE");
-
-	RetVal = CreateDirectory(FullPathName, NULL);
-
-	if (RetVal == 0 && GetLastError() != ERROR_ALREADY_EXISTS)
-	{
-		DoOutputDebugString("GetName: Error creating output directory");
-        free(OutputFilename);
-        free(FullPathName);
-		return 0;
-	}
-
-    PathAppend(FullPathName, OutputFilename);
+    free(OutputFilename);
 
 	return FullPathName;
 }
@@ -942,7 +962,7 @@ BOOL TestPERequirements(PIMAGE_NT_HEADERS pNtHeader)
         if (!(pNtHeader->FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE))
         {
             DoOutputDebugString("TestPERequirements: Characteristics bad. (0x%x)", (DWORD_PTR)pNtHeader);
-            return FALSE;
+            //return FALSE;
         }
 
         if (pNtHeader->FileHeader.SizeOfOptionalHeader & (sizeof (ULONG_PTR) - 1))
@@ -1027,8 +1047,8 @@ int IsDisguisedPEHeader(LPVOID Buffer)
     }
     __except(EXCEPTION_EXECUTE_HANDLER)
     {
-        DoOutputDebugString("IsDisguisedPEHeader: Exception occured reading region at 0x%x\n", (DWORD_PTR)(Buffer));
-        return -1;
+        //DoOutputDebugString("IsDisguisedPEHeader: Exception occured reading region at 0x%x\n", (DWORD_PTR)(Buffer));
+        return 0;
     }
 
     //DoOutputDebugString("IsDisguisedPEHeader: No PE image located\n (0x%x)", (DWORD_PTR)Buffer);
@@ -1133,7 +1153,6 @@ BOOL DumpPEsInRange(LPVOID Buffer, SIZE_T Size)
                             //break;
                         }
                     }
-
                     MachineProbe += sizeof(WORD);
 
                     if (pNtHeader && (PUCHAR)pNtHeader == (PUCHAR)pDosHeader && pNtHeader->OptionalHeader.SizeOfHeaders)
@@ -1152,9 +1171,7 @@ BOOL DumpPEsInRange(LPVOID Buffer, SIZE_T Size)
             *(WORD*)pDosHeader = IMAGE_DOS_SIGNATURE;
             *(DWORD*)((PUCHAR)pDosHeader + pDosHeader->e_lfanew) = IMAGE_NT_SIGNATURE;
 
-#ifdef CAPE_INJECTION
             SetCapeMetaData(INJECTION_PE, 0, NULL, (PVOID)pDosHeader);
-#endif
 
             if (DumpImageInCurrentProcess((LPVOID)pDosHeader))
             {
@@ -1370,54 +1387,6 @@ int DumpCurrentProcess()
 }
 
 //**************************************************************************************
-int DumpModuleInCurrentProcess(LPVOID ModuleBase)
-//**************************************************************************************
-{
-    PIMAGE_DOS_HEADER pDosHeader;
-
-    if (!IsDisguisedPEHeader(ModuleBase))
-    {
-        DoOutputDebugString("DumpModuleInCurrentProcess: Not a valid image at 0x%p - cannot dump.\n", ModuleBase);
-        return 0;
-    }
-
-    pDosHeader = (PIMAGE_DOS_HEADER)ModuleBase;
-
-    if (*(WORD*)ModuleBase != IMAGE_DOS_SIGNATURE || (*(DWORD*)((BYTE*)pDosHeader + pDosHeader->e_lfanew) != IMAGE_NT_SIGNATURE))
-    {
-        PBYTE PEImage;
-        SIZE_T ImageSize;
-
-        DoOutputDebugString("DumpModuleInCurrentProcess: Disguised PE image (bad MZ and/or PE headers) at 0x%p.\n", ModuleBase);
-
-        // We want to fix the PE header in the dump (for e.g. disassembly etc)
-        ImageSize = GetPESize(ModuleBase);
-        PEImage = (BYTE*)malloc(ImageSize);
-        memcpy(PEImage, ModuleBase, ImageSize);
-        pDosHeader = (PIMAGE_DOS_HEADER)PEImage;
-
-        *(WORD*)PEImage = IMAGE_DOS_SIGNATURE;
-        *(DWORD*)(PEImage + pDosHeader->e_lfanew) = IMAGE_NT_SIGNATURE;
-
-        ModuleBase = PEImage;
-    }
-
-#ifdef CAPE_INJECTION
-    SetCapeMetaData(INJECTION_PE, 0, NULL, (PVOID)ModuleBase);
-#else
-    SetCapeMetaData(EXTRACTION_PE, 0, NULL, (PVOID)ModuleBase);
-#endif
-
-    if (DumpCount < DUMP_MAX && ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)ModuleBase, 0))
-    {
-        DumpCount++;
-        return 1;
-    }
-
-	return 0;
-}
-
-//**************************************************************************************
 int DumpImageInCurrentProcess(LPVOID ImageBase)
 //**************************************************************************************
 {
@@ -1490,6 +1459,81 @@ int DumpImageInCurrentProcess(LPVOID ImageBase)
 }
 
 //**************************************************************************************
+unsigned int DumpImageToFileHandle(LPVOID ImageBase, HANDLE FileHandle)
+//**************************************************************************************
+{
+    unsigned int BytesWritten;
+    PIMAGE_DOS_HEADER pDosHeader;
+    PIMAGE_NT_HEADERS pNtHeader;
+
+    pDosHeader = (PIMAGE_DOS_HEADER)ImageBase;
+
+	if (DumpCount >= DUMP_MAX)
+	{
+        DoOutputDebugString("DumpImageToFileHandle: CAPE dump limit reached.\n");
+        return 0;
+    }
+
+    if (*(WORD*)ImageBase != IMAGE_DOS_SIGNATURE)
+    {
+        DoOutputDebugString("DumpImageToFileHandle: No DOS signature in header.\n");
+        return 0;
+    }
+
+    if (!pDosHeader->e_lfanew || pDosHeader->e_lfanew > PE_HEADER_LIMIT)
+    {
+        DoOutputDebugString("DumpImageToFileHandle: bad e_lfanew.\n");
+        return 0;
+    }
+
+    pNtHeader = (PIMAGE_NT_HEADERS)((PUCHAR)pDosHeader + (ULONG)pDosHeader->e_lfanew);
+
+    if (pNtHeader->Signature != IMAGE_NT_SIGNATURE)
+    {
+        // No 'PE' header
+        DoOutputDebugString("DumpImageToFileHandle: Invalid PE signature in header.\n");
+        return 0;
+    }
+
+    if ((pNtHeader->FileHeader.Machine == 0) || (pNtHeader->FileHeader.SizeOfOptionalHeader == 0 || pNtHeader->OptionalHeader.SizeOfHeaders == 0))
+    {
+        // Basic requirements
+        DoOutputDebugString("DumpImageToFileHandle: PE image invalid.\n");
+        return 0;
+    }
+
+    if (IsPeImageVirtual(ImageBase) == FALSE)
+    {
+        DoOutputDebugString("DumpImageToFileHandle: Attempting to dump 'raw' PE image.\n");
+
+        if (ScyllaDumpPEToFileHandle((DWORD_PTR)ImageBase, FileHandle))
+        {
+            DumpCount++;
+            return 1;
+        }
+        else
+        {
+            // failed to dump pe image
+            DoOutputDebugString("DumpImageToFileHandle: Failed to dump 'raw' PE image.\n");
+            return 0;
+        }
+    }
+
+    DoOutputDebugString("DumpImageToFileHandle: Attempting to dump virtual PE image.\n");
+
+    BytesWritten = ScyllaDumpProcessToFileHandle(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0, FileHandle);
+
+    if (!BytesWritten)
+    {
+        DoOutputDebugString("DumpImageToFileHandle: Failed to dump PE as virtual image.\n");
+        return 0;
+    }
+
+    DumpCount++;
+    return 1;
+}
+
+//**************************************************************************************
 int DumpProcess(HANDLE hProcess, LPVOID ImageBase, LPVOID NewEP)
 //**************************************************************************************
 {
@@ -1518,40 +1562,269 @@ int DumpPE(LPVOID Buffer)
 }
 
 //**************************************************************************************
-int RoutineProcessDump()
+void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
 //**************************************************************************************
 {
-    PVOID ImageBase, CallerBase = GetHookCallerBase();
+    //PIMAGE_DOS_HEADER pDosHeader;
+    //wchar_t *MappedPath, *ModulePath, *AbsoluteMapped, *AbsoluteModule;
+
+    if (!MemInfo.BaseAddress)
+        return;
+
+    if (MemInfo.BaseAddress == (PVOID)g_our_dll_base)
+        return;
+
+    __try
+    {
+        BYTE Test = *(BYTE*)MemInfo.BaseAddress;
+        Test = *(BYTE*)MemInfo.BaseAddress + PE_HEADER_LIMIT;
+    }
+    __except(EXCEPTION_EXECUTE_HANDLER)
+    {
+        // No point in continuing if we can't read!
+        return;
+    }
+
+    if (MemInfo.BaseAddress == ImageBase)
+    {
+        DoOutputDebugString("DumpInterestingRegions: Dumping Imagebase at 0x%p.\n", ImageBase);
+        CapeMetaData->DumpType = PROCDUMP;
+        if (g_config.import_reconstruction)
+            ProcessDumped = ScyllaDumpProcessFixImports(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
+        else
+            ProcessDumped = ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
+    }
+    // Disable dumping of all calling regions for the moment as this needs further testing.
+    // (This causes lots of useless dumps from Word processes, for example.)
+    //else if (lookup_get(&g_caller_regions, (ULONG_PTR)MemInfo.BaseAddress, NULL) || MemInfo.BaseAddress == CallerBase)
+    else if (MemInfo.BaseAddress == CallerBase)
+    {
+        DoOutputDebugString("DumpInterestingRegions: Dumping calling region at 0x%p.\n", MemInfo.BaseAddress);
+
+        CapeMetaData->ModulePath = NULL;
+        CapeMetaData->DumpType = DATADUMP;
+        CapeMetaData->Address = MemInfo.BaseAddress;
+
+        if (IsDisguisedPEHeader(MemInfo.BaseAddress))
+            ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)MemInfo.BaseAddress, 0);
+        else
+            DumpRegion(MemInfo.BaseAddress);
+    }
+}
+
+//**************************************************************************************
+int DoProcessDump(PVOID CallerBase)
+//**************************************************************************************
+{
+	HANDLE hSnapShot;
+    THREADENTRY32 ThreadInfo;
+    PUCHAR Address;
+    MEMORY_BASIC_INFORMATION MemInfo;
+    HANDLE FileHandle;
+    char *FullDumpPath, *OutputFilename;
+
+    EnterCriticalSection(&ProcessDumpCriticalSection);
 
     if (base_of_dll_of_interest)
         ImageBase = (PVOID)base_of_dll_of_interest;
     else
         ImageBase = GetModuleHandle(NULL);
 
-    if (g_config.procdump && ProcessDumped == FALSE)
-    {
-        ProcessDumped = TRUE;   // this prevents a second call before the first is complete
-        if (g_config.import_reconstruction)
-            ProcessDumped = ScyllaDumpProcessFixImports(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
-        else
-            ProcessDumped = ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
+	PHANDLE SuspendedThreads = (PHANDLE)malloc(SUSPENDED_THREAD_MAX*sizeof(HANDLE));
+	DWORD ThreadId = GetCurrentThreadId(), SuspendedThreadCount = 0;
 
-        if (CallerBase && ImageBase != CallerBase && called_by_hook())
-        {
-            DoOutputDebugString("RoutineProcessDump: Terminate caller base (0x%p) different to imagebase (0x%p) - dumping.\n", CallerBase, ImageBase);
-            ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)CallerBase, 0);
-        }
+    if (!SystemInfo.dwPageSize)
+        GetSystemInfo(&SystemInfo);
+
+    if (!SystemInfo.dwPageSize)
+    {
+        DoOutputErrorString("DoProcessDump: Failed to obtain system page size.\n");
+        goto out;
     }
 
-#ifdef CAPE_INJECTION
-    TerminateHandler();
-#endif
-	return ProcessDumped;
+    // suspend other threads before dump
+    hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+	Thread32First(hSnapShot, &ThreadInfo);
+
+	do
+    {
+		if (ThreadInfo.th32OwnerProcessID != CapeMetaData->Pid || ThreadInfo.th32ThreadID == ThreadId || SuspendedThreadCount >= SUSPENDED_THREAD_MAX)
+			continue;
+
+        SuspendedThreads[SuspendedThreadCount] = OpenThread(THREAD_SUSPEND_RESUME, FALSE, ThreadInfo.th32ThreadID);
+
+        if (SuspendedThreads[SuspendedThreadCount])
+        {
+			SuspendThread(SuspendedThreads[SuspendedThreadCount]);
+			SuspendedThreadCount++;
+		}
+	}
+    while(Thread32Next(hSnapShot, &ThreadInfo));
+
+    if (g_config.procmemdump)
+    {
+        FullDumpPath = GetResultsPath("memory");
+
+        if (!FullDumpPath)
+        {
+            DoOutputDebugString("DoProcessDump: Unable to get path to dump file directory.\n");
+            goto out;
+        }
+
+        OutputFilename = (char*)malloc(MAX_PATH);
+
+        sprintf_s(OutputFilename, MAX_PATH, "%d.dmp", CapeMetaData->Pid);
+
+        PathAppend(FullDumpPath, OutputFilename);
+
+        FileHandle = CreateFile(FullDumpPath, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+
+        if (FileHandle == INVALID_HANDLE_VALUE)
+        {
+            DoOutputDebugString("DoProcessDump: Unable to create dump file for full process memory dump.\n");
+            goto out;
+        }
+
+        DoOutputDebugString("DoProcessDump: Created dump file for full process memory dump: %s.\n", FullDumpPath);
+    }
+
+    for (Address = (PUCHAR)SystemInfo.lpMinimumApplicationAddress; Address < (PUCHAR)SystemInfo.lpMaximumApplicationAddress;)
+    {
+        if (!VirtualQuery(Address, &MemInfo, sizeof(MemInfo)))
+        {
+            Address += SystemInfo.dwPageSize;
+            continue;
+        }
+
+        if (!(MemInfo.State & MEM_COMMIT) || !(MemInfo.Type & (MEM_IMAGE | MEM_MAPPED | MEM_PRIVATE)))
+        {
+            Address += MemInfo.RegionSize;
+            continue;
+        }
+
+        if (g_config.procdump)
+        {
+            DumpInterestingRegions(MemInfo, CallerBase);
+        }
+
+        if (g_config.procmemdump)
+        {
+            LARGE_INTEGER BufferAddress;
+            DWORD BytesWritten;
+            PVOID TempBuffer;
+
+            BufferAddress.QuadPart = (ULONGLONG)Address;
+            TempBuffer = malloc(MemInfo.RegionSize);
+            if (!TempBuffer)
+            {
+                DoOutputDebugString("DoProcessDump: Error allocating memory for copy of region at 0x%p, size 0x%x.\n", MemInfo.BaseAddress, MemInfo.RegionSize);
+                goto out;
+            }
+            __try
+            {
+                memcpy(TempBuffer, MemInfo.BaseAddress, MemInfo.RegionSize);
+                WriteFile(FileHandle, &BufferAddress, sizeof(BufferAddress), &BytesWritten, NULL);
+                WriteFile(FileHandle, &(DWORD)MemInfo.RegionSize, sizeof(DWORD), &BytesWritten, NULL);
+                WriteFile(FileHandle, &MemInfo.State, sizeof(MemInfo.State), &BytesWritten, NULL);
+                WriteFile(FileHandle, &MemInfo.Type, sizeof(MemInfo.Type), &BytesWritten, NULL);
+                WriteFile(FileHandle, &MemInfo.Protect, sizeof(MemInfo.Protect), &BytesWritten, NULL);
+                WriteFile(FileHandle, TempBuffer, (DWORD)MemInfo.RegionSize, &BytesWritten, NULL);
+                free(TempBuffer);
+                if (BytesWritten != MemInfo.RegionSize)
+                    DoOutputDebugString("DoProcessDump: Anomaly detected, wrote only 0x%x of 0x%x bytes to memory dump from region 0x%p.\n", BytesWritten, MemInfo.RegionSize, MemInfo.BaseAddress);
+                else
+                    DoOutputDebugString("DoProcessDump: Added 0x%x byte region at 0x%p to memory dump (protect 0x%x).\n", MemInfo.RegionSize, MemInfo.BaseAddress, MemInfo.Protect);
+            }
+            __except(EXCEPTION_EXECUTE_HANDLER)
+            {
+                free(TempBuffer);
+                DoOutputDebugString("DoProcessDump: Exception attempting to dump region at 0x%p, size 0x%x.\n", MemInfo.BaseAddress, MemInfo.RegionSize);
+            }
+        }
+
+        Address += MemInfo.RegionSize;
+    }
+
+out:
+    if (g_config.procmemdump)
+    {
+        if (FileHandle)
+        {
+            DoOutputDebugString("DoProcessDump: Full process memory dump saved to file: %s.\n", FullDumpPath);
+            CloseHandle(FileHandle);
+        }
+        if (OutputFilename)
+            free(OutputFilename);
+        if (FullDumpPath)
+            free(FullDumpPath);
+    }
+
+    if (SuspendedThreads)
+    {
+        for (unsigned int i = 0; i < SuspendedThreadCount; i++)
+        {
+            ResumeThread(SuspendedThreads[i]);
+            CloseHandle(SuspendedThreads[i]);
+        }
+        free(SuspendedThreads);
+    }
+
+	LeaveCriticalSection(&ProcessDumpCriticalSection);
+    return ProcessDumped;
+}
+
+void RestoreHeaders()
+{
+    DWORD ImportsRVA, ImportsSize, SizeOfHeaders, dwProtect;
+    PVOID BaseAddress, ImportsVA;
+    PIMAGE_DOS_HEADER pDosHeader;
+    PIMAGE_NT_HEADERS pNtHeaders;
+
+    BaseAddress = GetModuleHandle(NULL);
+    SizeOfHeaders = sizeof(IMAGE_NT_HEADERS);
+    pDosHeader = (PIMAGE_DOS_HEADER)BaseAddress;
+    pNtHeaders = (PIMAGE_NT_HEADERS)((PBYTE)BaseAddress + pDosHeader->e_lfanew);
+    ImportsRVA = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
+    ImportsSize = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size;
+    ImportsVA = (PBYTE)BaseAddress + ImportsRVA;
+
+    // Check if we have a PE header after import table
+    if (*(DWORD*)((PBYTE)ImportsVA + ImportsSize) != IMAGE_NT_SIGNATURE)
+        return;
+
+    // Set page permissions to allow writing of original headers
+    if (!VirtualProtect((PBYTE)BaseAddress, SizeOfHeaders, PAGE_EXECUTE_READWRITE, &dwProtect))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to modify memory page protection of NtHeaders");
+        return;
+    }
+
+    memcpy((PBYTE)BaseAddress + pDosHeader->e_lfanew, (PBYTE)ImportsVA + ImportsSize, SizeOfHeaders);
+
+    // Restore original protection
+    if (!VirtualProtect((PBYTE)BaseAddress, SizeOfHeaders, dwProtect, &dwProtect))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to restore previous memory page protection");
+        return;
+    }
+
+    // Free memory
+    if (!VirtualFree(ImportsVA, 0, MEM_RELEASE))
+    {
+        DoOutputErrorString("RestoreHeaders: Failed to free memory for patched IAT");
+        return;
+    }
+
+    DoOutputDebugString("RestoreHeaders: Restored original import table.\n");
 }
 
 void init_CAPE()
 {
     char* CommandLine;
+
+    // Restore headers in case of IAT patching
+    RestoreHeaders();
+
     // Initialise CAPE global variables
     //
 #ifndef STANDALONE
@@ -1575,6 +1848,11 @@ void init_CAPE()
     // or upon submission. (This overrides submission.)
     g_config.procdump = 0;
 
+    InitializeCriticalSection(&ProcessDumpCriticalSection);
+
+    lookup_add(&g_caller_regions, (ULONG_PTR)GetModuleHandle(NULL), 0);
+    lookup_add(&g_caller_regions, (ULONG_PTR)g_our_dll_base, 0);
+
     // Cuckoo debug output level for development (0=none, 2=max)
     // g_config.debug = 2;
 #endif
@@ -1592,7 +1870,8 @@ void init_CAPE()
     DoOutputDebugString("CAPE initialised: 32-bit Injection package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
 #endif
 
+#ifndef STANDALONE
     DoOutputDebugString("Commandline: %s.\n", CommandLine);
-
+#endif
     return;
 }

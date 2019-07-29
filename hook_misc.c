@@ -67,7 +67,7 @@ HOOKDEF(HHOOK, WINAPI, SetWindowsHookExW,
 ) {
 
 	HHOOK ret;
-	
+
 	if (hMod && lpfn && dwThreadId) {
 		DWORD pid = get_pid_by_tid(dwThreadId);
 		if (pid && pid != GetCurrentProcessId())
@@ -177,14 +177,14 @@ HOOKDEF(NTSTATUS, WINAPI, LdrGetProcedureAddress,
 	if (FunctionName != NULL && FunctionName->Length == 13 && FunctionName->Buffer != NULL &&
 		(!strncmp(FunctionName->Buffer, "EncodePointer", 13) || !strncmp(FunctionName->Buffer, "DecodePointer", 13)))
 		return ret;
-    
+
     LOQ_ntstatus("system", "opSiP", "ModuleName", get_basename_of_module(ModuleHandle), "ModuleHandle", ModuleHandle,
         "FunctionName", FunctionName != NULL ? FunctionName->Length : 0,
             FunctionName != NULL ? FunctionName->Buffer : NULL,
         "Ordinal", Ordinal, "FunctionAddress", FunctionAddress);
 
 	if (hook_info()->main_caller_retaddr && g_config.first_process && FunctionName != NULL && (ret == 0xc000007a || ret == 0xc0000139) && FunctionName->Length == 7 &&
-		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path, g_config.file_of_interest)) {
+		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path_w, g_config.file_of_interest)) {
 		log_flush();
 		ExitThread(0);
 	}
@@ -204,7 +204,7 @@ HOOKDEF(BOOL, WINAPI, DeviceIoControl,
 ) {
 	BOOL ret;
 	ENSURE_DWORD(lpBytesReturned);
-	
+
 	ret = Old_DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer,
 		nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned,
 		lpOverlapped);
@@ -401,7 +401,7 @@ HOOKDEF(NTSTATUS, WINAPI, NtDuplicateObject,
 		}
 #ifdef CAPE_INJECTION
         DuplicationHandler(SourceHandle, TargetProcessHandle);
-#endif        
+#endif
 	}
 	return ret;
 }
@@ -853,7 +853,7 @@ HOOKDEF(HDEVINFO, WINAPI, SetupDiGetClassDevsW,
 			LOQ_handle("misc", "ss", "ClassGuid", idbuf, "Known", known);
 		else
 			LOQ_handle("misc", "s", "ClassGuid", idbuf);
-            
+
         set_lasterrors(&lasterror);
 	}
 	return ret;
@@ -1108,15 +1108,15 @@ HOOKDEF(void, WINAPIV, memcpy,
    void *dest,
    const void *src,
    size_t count
-) 
+)
 {
 	int ret = 0;	// needed for LOQ_void
 
 	Old_memcpy(dest, src, count);
-	
+
     if (count > 0xa00)
         LOQ_void("misc", "bppi", "DestinationBuffer", count, dest, "source", src, "destination", dest, "count", count);
-	
+
 	return;
 }
 
@@ -1484,4 +1484,34 @@ HOOKDEF(VOID, WINAPI, LocalFree,
 	int ret = 0;
 	Old_LocalFree(hMem);
 	LOQ_void("misc", "p", "SourceBuffer", hMem);
+}
+
+#define MSGFLT_ADD 1
+#define MSGFLT_REMOVE 2
+HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+  UINT  message,
+  DWORD dwFlag
+)
+{
+	BOOL ret;
+    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD) {
+        ret = FALSE;
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    else
+        ret = Old_ChangeWindowMessageFilter(message, dwFlag);
+	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
+	return ret;
+}
+
+HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+)
+{
+	LPWSTR ret = Old_rtcEnvironBstr(es);
+	LOQ_bool("misc", "uu", "EnvVar", es->envstr, "EnvStr", ret);
+	if (ret && !wcsicmp(es->envstr, L"userdomain"))
+        // replace first char so it differs from computername
+        *ret = '#';
+	return ret;
 }
