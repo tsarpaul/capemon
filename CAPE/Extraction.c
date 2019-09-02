@@ -107,15 +107,13 @@ typedef struct _hook_info_t {
 	ULONG_PTR parent_caller_retaddr;
 } hook_info_t;
 
-extern ULONG_PTR g_our_dll_base;
-extern DWORD g_our_dll_size;
-
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern void DoOutputErrorString(_In_ LPCTSTR lpOutputString, ...);
 
 extern unsigned int address_is_in_stack(PVOID Address);
 extern ULONG_PTR g_our_dll_base;
 extern DWORD g_our_dll_size;
+extern HANDLE g_terminate_event_handle;
 
 extern int operate_on_backtrace(ULONG_PTR _esp, ULONG_PTR _ebp, void *extra, int(*func)(void *, ULONG_PTR));
 extern int WINAPI enter_hook(ULONG_PTR *h, ULONG_PTR sp, ULONG_PTR ebp_or_rip);
@@ -132,6 +130,7 @@ extern int ScanForPE(PVOID Buffer, SIZE_T Size, PVOID* Offset);
 extern int ScanPageForNonZero(PVOID Address);
 
 BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTERS* ExceptionInfo);
+BOOL ShellcodeExecCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_POINTERS* ExceptionInfo);
 
 PTRACKEDREGION GuardedPagesToStep, TrackedRegionFromHook, CurrentBreakpointRegion;
 static DWORD_PTR LastEIP, CurrentEIP;
@@ -911,7 +910,7 @@ void ProcessImageBase(PTRACKEDREGION TrackedRegion)
     DWORD EntryPoint;
     SIZE_T MinPESize;
     double Entropy;
-    
+
     if (!TrackedRegion)
         return;
 
@@ -937,7 +936,7 @@ void ProcessImageBase(PTRACKEDREGION TrackedRegion)
 
     SetCapeMetaData(EXTRACTION_PE, 0, NULL, TrackedRegion->AllocationBase);
 
-    DumpCurrentProcessFixImports((PVOID)TrackedRegion->EntryPoint);    
+    DumpCurrentProcessFixImports((PVOID)TrackedRegion->EntryPoint);
 }
 
 //**************************************************************************************
@@ -947,7 +946,7 @@ void ProcessTrackedRegion(PTRACKEDREGION TrackedRegion)
     if (!TrackedRegion)
         return;
 
-    if (!TrackedRegion->CanDump)
+    if (!TrackedRegion->CanDump && g_terminate_event_handle)
         return;
 
     if (TrackedRegion->PagesDumped)
@@ -1167,7 +1166,7 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
         hook_enable();
         return;
     }
-    
+
     TrackedRegion->AllocationBase = TrackedRegion->MemInfo.AllocationBase;
     DoOutputDebugString("ProtectionHandler: Address: 0x%p (alloc base 0x%p), NumberOfBytesToProtect: 0x%x, NewAccessProtection: 0x%x\n", Address, TrackedRegion->AllocationBase, RegionSize, Protect);
 
@@ -1176,13 +1175,13 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
     if (TrackedRegion->RegionSize < TrackedRegionSize)
     {
         TrackedRegion->RegionSize = TrackedRegionSize;
-        DoOutputDebugString("ProtectionHandler: Increased region size at 0x%p to 0x%x.\n", Address, TrackedRegionSize);            
+        DoOutputDebugString("ProtectionHandler: Increased region size at 0x%p to 0x%x.\n", Address, TrackedRegionSize);
     }
 
     if (TrackedRegion->Protect != Protect)
     {
         TrackedRegion->Protect = Protect;
-        DoOutputDebugString("ProtectionHandler: Updated region protection at 0x%p to 0x%x.\n", Address, Protect);            
+        DoOutputDebugString("ProtectionHandler: Updated region protection at 0x%p to 0x%x.\n", Address, Protect);
     }
 
     if (TrackedRegion->AllocationBase == GetModuleHandle(NULL))
@@ -1191,7 +1190,7 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
         hook_enable();
         return;
     }
-    
+
     if (NewRegion && ScanForNonZero(Address, RegionSize))
     {
         DoOutputDebugString("ProtectionHandler: New code detected at (0x%p), scanning for PE images.\n", TrackedRegion->AllocationBase);
@@ -1220,7 +1219,7 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
         //    }
         //    else
         //        DoOutputDebugString("ProtectionHandler: Failed tae dump range.");
-        //}        
+        //}
     }
     //else
     //    DoOutputDebugString("ProtectionHandler: No action taken on empty protected region at 0x%p.\n", TrackedRegion->AllocationBase);
@@ -1309,7 +1308,7 @@ void MapSectionViewHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect)
         if (TrackedRegion->RegionSize < RegionSize)
         {
             TrackedRegion->RegionSize = RegionSize;
-            DoOutputDebugString("MapSectionViewHandler: Increased region size at 0x%p to 0x%x.\n", Address, RegionSize);            
+            DoOutputDebugString("MapSectionViewHandler: Increased region size at 0x%p to 0x%x.\n", Address, RegionSize);
         }
 
         TrackedRegion->Protect = Protect;
@@ -2623,10 +2622,21 @@ BOOL PEPointerWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_P
     {
         // This is to be expected a lot when it's not a PE.
         DoOutputDebugString("PEPointerWriteCallback: candidate pointer to PE header too big: 0x%x (at 0x%p).\n", pDosHeader->e_lfanew, &pDosHeader->e_lfanew);
-        return TRUE;
+
+        if (ContextSetNextAvailableBreakpoint(ExceptionInfo->ContextRecord, &TrackedRegion->ExecBpRegister, 0, (BYTE*)TrackedRegion->AllocationBase, BP_EXEC, ShellcodeExecCallback))
+        {
+            DoOutputDebugString("PEPointerWriteCallback: set write bp on AddressOfEntryPoint at 0x%p.\n", TrackedRegion->AllocationBase);
+            return TRUE;
+        }
+        else
+        {
+            DoOutputDebugString("PEPointerWriteCallback: Failed to set exec bp on AllocationBase at 0x%p.\n", TrackedRegion->AllocationBase);
+            TrackedRegion->ExecBp = NULL;
+            return FALSE;
+        }
     }
 
-    if (*(WORD*)TrackedRegion->AllocationBase == IMAGE_DOS_SIGNATURE)    
+    if (*(WORD*)TrackedRegion->AllocationBase == IMAGE_DOS_SIGNATURE)
         TrackedRegion->CanDump = TRUE;
 
 #ifdef _WIN64
@@ -2844,7 +2854,7 @@ BOOL BaseAddressWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION
     if (*(WORD*)pBreakpointInfo->Address == IMAGE_DOS_SIGNATURE)
     {
         DoOutputDebugString("BaseAddressWriteCallback: MZ header found.\n");
-    
+
         TrackedRegion->CanDump = TRUE;
 
         pDosHeader = (PIMAGE_DOS_HEADER)pBreakpointInfo->Address;
@@ -2897,9 +2907,9 @@ BOOL BaseAddressWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION
         {
             DoOutputDebugString("BaseAddressWriteCallback: ContextUpdateCurrentBreakpoint failed\n");
             return FALSE;
-        }        
+        }
     }
-    else if (*(BYTE*)pBreakpointInfo->Address == 'M') 
+    else if (*(BYTE*)pBreakpointInfo->Address == 'M')
     {
         // If a PE file is being written a byte at a time we do nothing and hope that the 4D byte isn't code!
         DoOutputDebugString("BaseAddressWriteCallback: M written to first byte, awaiting next byte.\n");
@@ -2969,8 +2979,11 @@ BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTER
         ClearAllBreakpoints();
 
         // We process the previous region if it contains code/data
-        if (CurrentBreakpointRegion->AllocationBase != GetModuleHandle(NULL) && ScanForNonZero(CurrentBreakpointRegion->AllocationBase, CurrentBreakpointRegion->RegionSize)) 
+        if (CurrentBreakpointRegion->AllocationBase != GetModuleHandle(NULL) && ScanForNonZero(CurrentBreakpointRegion->AllocationBase, CurrentBreakpointRegion->RegionSize))
+        {
+            CurrentBreakpointRegion->CanDump = 1;
             ProcessTrackedRegion(CurrentBreakpointRegion);
+        }
 
         // We switch regions
         CurrentBreakpointRegion = TrackedRegion;
@@ -3047,7 +3060,7 @@ BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTER
         // We set a write breakpoint instead
         if (ExceptionInfo == NULL)
         {
-            if (!SetNextAvailableBreakpoint(GetCurrentThreadId(), &TrackedRegion->ExecBpRegister, 0, (BYTE*)TrackedRegion->ExecBp, BP_WRITE, BaseAddressWriteCallback))
+            if (!SetNextAvailableBreakpoint(GetCurrentThreadId(), &TrackedRegion->ExecBpRegister, sizeof(WORD), (BYTE*)TrackedRegion->ExecBp, BP_WRITE, BaseAddressWriteCallback))
             {
                 DoOutputDebugString("ActivateBreakpoints: SetNextAvailableBreakpoint failed to set write bp on tracked region protect address 0x%p.\n", TrackedRegion->ExecBp);
                 TrackedRegion->ExecBp = NULL;
@@ -3058,7 +3071,7 @@ BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTER
         }
         else
         {
-            if (!ContextSetNextAvailableBreakpoint(ExceptionInfo->ContextRecord, &TrackedRegion->ExecBpRegister, 0, (BYTE*)TrackedRegion->ExecBp, BP_WRITE, BaseAddressWriteCallback))
+            if (!ContextSetNextAvailableBreakpoint(ExceptionInfo->ContextRecord, &TrackedRegion->ExecBpRegister, sizeof(WORD), (BYTE*)TrackedRegion->ExecBp, BP_WRITE, BaseAddressWriteCallback))
             {
                 DoOutputDebugString("ActivateBreakpoints: SetNextAvailableBreakpoint failed to set write bp on tracked region protect address 0x%p.\n", TrackedRegion->ExecBp);
                 TrackedRegion->ExecBp = NULL;
@@ -3096,7 +3109,7 @@ BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTER
     CurrentBreakpointRegion = TrackedRegion;
 
     return TRUE;    // this should set TrackedRegion->BreakpointsSet in calling function
-}   
+}
 
 void ExtractionInit()
 {

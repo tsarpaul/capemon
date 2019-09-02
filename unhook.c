@@ -252,17 +252,15 @@ int unhook_init_detection()
 }
 
 static HANDLE g_terminate_event_thread_handle;
-static HANDLE g_terminate_event_handle;
+HANDLE g_terminate_event_handle;
 
 static DWORD WINAPI _terminate_event_thread(LPVOID param)
 {
 	hook_disable();
-
     DWORD ProcessId = GetCurrentProcessId();
-
     WaitForSingleObject(g_terminate_event_handle, INFINITE);
-
     CloseHandle(g_terminate_event_handle);
+    g_terminate_event_handle = NULL;
 
     if (g_config.procdump) {
         if (!ProcessDumped) {

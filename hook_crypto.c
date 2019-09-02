@@ -109,6 +109,7 @@ HOOKDEF(BOOL, WINAPI, CryptUnprotectMemory,
     return ret;
 }
 
+#ifndef CAPE_HANCITOR
 HOOKDEF(BOOL, WINAPI, CryptDecrypt,
     _In_     HCRYPTKEY hKey,
     _In_     HCRYPTHASH hHash,
@@ -123,6 +124,7 @@ HOOKDEF(BOOL, WINAPI, CryptDecrypt,
         "Buffer", pdwDataLen, pbData, "Length", *pdwDataLen, "Final", Final);
     return ret;
 }
+#endif
 
 HOOKDEF(BOOL, WINAPI, CryptEncrypt,
     _In_     HCRYPTKEY hKey,
@@ -378,5 +380,18 @@ HOOKDEF(BOOL, WINAPI, CryptGenRandom,
 ) {
     BOOL ret = Old_CryptGenRandom(hProv, dwLen, pbBuffer);
     LOQ_bool("crypto", "b", "Buffer", dwLen, pbBuffer);
+    return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, CryptImportKey,
+    HCRYPTPROV hProv,
+    const BYTE *pbData,
+    DWORD      dwDataLen,
+    HCRYPTKEY  hPubKey,
+    DWORD      dwFlags,
+    HCRYPTKEY  *phKey
+) {
+    BOOL ret = Old_CryptImportKey(hProv, pbData, dwDataLen, hPubKey, dwFlags, phKey);
+    LOQ_bool("crypto", "bhp", "KeyBlob", dwDataLen, pbData, "Flags", dwFlags,  "CryptKey", *phKey);
     return ret;
 }

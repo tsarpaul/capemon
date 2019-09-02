@@ -27,8 +27,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "hook_sleep.h"
 #include "unhook.h"
 #include "config.h"
-#ifdef CAPE_EXTRACTION
+#include "CAPE\CAPE.h"
 #include "CAPE\Debugger.h"
+#ifdef CAPE_EXTRACTION
 #include "CAPE\Extraction.h"
 #endif
 
@@ -42,7 +43,10 @@ extern void UnmapSectionViewHandler(PVOID BaseAddress);
 extern void MapSectionViewHandler(HANDLE ProcessHandle, HANDLE SectionHandle, PVOID BaseAddress, SIZE_T ViewSize);
 extern void WriteMemoryHandler(HANDLE ProcessHandle, LPVOID BaseAddress, LPCVOID Buffer, SIZE_T NumberOfBytesWritten);
 #endif
-
+#ifdef CAPE_EXTRACTION
+extern HANDLE g_terminate_event_handle;
+#endif
+extern BOOL CAPEExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context);
 extern void file_handle_terminate();
 extern int DoProcessDump(PVOID CallerBase);
 extern PVOID GetHookCallerBase();
@@ -414,6 +418,7 @@ HOOKDEF(NTSTATUS, WINAPI, NtTerminateProcess,
 
 #ifdef CAPE_EXTRACTION
     DoOutputDebugString("NtTerminateProcess hook: Processing tracked regions before shutdown (process %d).\n", GetCurrentProcessId());
+    g_terminate_event_handle = NULL;    // This tells ProcessTrackedRegions it's the final time
     ProcessTrackedRegions();
     ClearAllBreakpoints();
 #endif
@@ -995,11 +1000,13 @@ HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 	// flush logs prior to handling of an exception without having to register a vectored exception handler
 	log_flush();
 
-    struct _EXCEPTION_POINTERS ExceptionInfo;
-    ExceptionInfo.ExceptionRecord = ExceptionRecord;
-    ExceptionInfo.ContextRecord = Context;
-    if (CAPEExceptionFilter(&ExceptionInfo) == EXCEPTION_CONTINUE_EXECUTION)
-        return 1;
+    if (DEBUGGER_ENABLED)
+    {
+        if (CAPEExceptionDispatcher(ExceptionRecord, Context))
+            return 1;
+        else
+            RetVal = Old_RtlDispatchException(ExceptionRecord, Context);
+    }
     else
         RetVal = Old_RtlDispatchException(ExceptionRecord, Context);
 

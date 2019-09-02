@@ -423,6 +423,19 @@ void ShowStack(DWORD_PTR StackPointer, unsigned int NumberOfRecords)
 }
 
 //**************************************************************************************
+BOOL CAPEExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context)
+//**************************************************************************************
+{
+    struct _EXCEPTION_POINTERS ExceptionInfo;
+    ExceptionInfo.ExceptionRecord = ExceptionRecord;
+    ExceptionInfo.ContextRecord = Context;
+    if (CAPEExceptionFilter(&ExceptionInfo) == EXCEPTION_CONTINUE_EXECUTION)
+        return TRUE;
+    else
+        return FALSE;
+}
+
+//**************************************************************************************
 LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
 //**************************************************************************************
 {
@@ -473,10 +486,8 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
                 ResumeAfterExecutionBreakpoint(ExceptionInfo->ContextRecord, pBreakpointInfo);
             }
             else
-            {
-                DoOutputDebugString("CAPEExceptionFilter: Error, unhandled single-step exception at: 0x%x\n", ExceptionInfo->ExceptionRecord->ExceptionAddress);
+                // Unhandled single-step exception, pass it on
                 return EXCEPTION_CONTINUE_SEARCH;
-            }
 
             return EXCEPTION_CONTINUE_EXECUTION;
         }
@@ -1718,11 +1729,11 @@ BOOL ContextSetThreadBreakpoint
         DoOutputDebugString("ContextSetThreadBreakpoint: Error - Failed to acquire thread breakpoints.\n");
         return FALSE;
     }
-    
+
     // Check whether an identical breakpoint already exists
     for (unsigned int i = 0; i < NUMBER_OF_DEBUG_REGISTERS; i++)
     {
-        if 
+        if
         (
             CurrentThreadBreakpoint->BreakpointInfo[i].Size == Size &&
             CurrentThreadBreakpoint->BreakpointInfo[i].Address == Address &&
@@ -1731,7 +1742,7 @@ BOOL ContextSetThreadBreakpoint
         {
             DoOutputDebugString("ContextSetThreadBreakpoint: An identical breakpoint (%d) at 0x%p already exists for thread %d (process %d), skipping.\n", i, Address, CurrentThreadBreakpoint->ThreadId, GetCurrentProcessId());
             return TRUE;
-        }        
+        }
     }
 
     if (!ContextSetDebugRegister(Context, Register, Size, Address, Type))
@@ -2089,7 +2100,7 @@ BOOL SetThreadBreakpoint
     // Check whether an identical breakpoint already exists
     for (unsigned int i = 0; i < NUMBER_OF_DEBUG_REGISTERS; i++)
     {
-        if 
+        if
         (
             CurrentThreadBreakpoint->ThreadId == ThreadId &&
             CurrentThreadBreakpoint->BreakpointInfo[i].Size == Size &&
@@ -2099,7 +2110,7 @@ BOOL SetThreadBreakpoint
         {
             DoOutputDebugString("SetThreadBreakpoint: An identical breakpoint (%d) at 0x%p already exists for thread %d (process %d), skipping.\n", i, Address, ThreadId, GetCurrentProcessId());
             return TRUE;
-        }        
+        }
     }
 
 	pBreakpointInfo->ThreadHandle   = CurrentThreadBreakpoint->ThreadHandle;
@@ -2324,7 +2335,9 @@ BOOL ClearBreakpoint(int Register)
         ThreadBreakpoints->BreakpointInfo[Register].Type          = 0;
         ThreadBreakpoints->BreakpointInfo[Register].Callback      = NULL;
 
+#ifdef DEBUG_COMMENTS
 		DoOutputDebugString("ClearBreakpoint: About to call ClearThreadBreakpoint for thread %d.\n", ThreadBreakpoints->ThreadId);
+#endif
 
         ClearThreadBreakpoint(ThreadBreakpoints->ThreadId, Register);
 

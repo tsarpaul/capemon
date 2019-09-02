@@ -78,6 +78,13 @@ static int set_caller_info(void *unused, ULONG_PTR addr)
                 }            
                 lookup_add(&g_caller_regions, (ULONG_PTR)AllocationBase, 0);
                 DoOutputDebugString("set_caller_info: Adding region at 0x%p to caller regions list.\n", AllocationBase);
+#ifdef CAPE_EXTRACTION
+                PTRACKEDREGION TrackedRegion = GetTrackedRegion(addr);
+                if (TrackedRegion) {
+                    TrackedRegion->CanDump = 1;
+                    ProcessTrackedRegion(TrackedRegion);
+                }
+#endif
             }
         }
 		else {
