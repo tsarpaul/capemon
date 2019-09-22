@@ -179,7 +179,7 @@ HOOKDEF(NTSTATUS, WINAPI, LdrGetProcedureAddress,
         "Ordinal", Ordinal, "FunctionAddress", FunctionAddress);
 
 	if (hook_info()->main_caller_retaddr && g_config.first_process && FunctionName != NULL && (ret == 0xc000007a || ret == 0xc0000139) && FunctionName->Length == 7 &&
-		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path, g_config.file_of_interest)) {
+		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path_w, g_config.file_of_interest)) {
 		log_flush();
 		ExitThread(0);
 	}
@@ -1423,6 +1423,19 @@ HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
 	LOQ_bool("misc", "b", "OLE2", len, buf);
 	return ret;
 }
+
+HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+)
+{
+    HANDLE ret;
+    ret = Old_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
+    LOQ_nonnull("misc", "ihh", "Options", flOptions, "InitialSize", dwInitialSize, "MaximumSize", dwMaximumSize);
+    return ret;
+}
+
 HOOKDEF(BOOL, WINAPI, FlsAlloc,
 	_In_ PFLS_CALLBACK_FUNCTION lpCallback
 ) {
@@ -1483,14 +1496,33 @@ HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
 )
 {
 	BOOL ret;
-    ret = Old_ChangeWindowMessageFilter(message, dwFlag);
-    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD)
-    {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        DoOutputDebugString("ChangeWindowMessageFilter hook: dwFlag: %d, ret %d, GetLastError 0x%x.\n", dwFlag, ret, GetLastError());
+    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD) {
         ret = FALSE;
+        SetLastError(ERROR_INVALID_PARAMETER);
     }
+    else
+        ret = Old_ChangeWindowMessageFilter(message, dwFlag);
 	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
-    SetLastError(ERROR_INVALID_PARAMETER);
+	return ret;
+}
+
+HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+)
+{
+	LPWSTR ret = Old_rtcEnvironBstr(es);
+	LOQ_bool("misc", "uu", "EnvVar", es->envstr, "EnvStr", ret);
+	if (ret && !wcsicmp(es->envstr, L"userdomain"))
+        // replace first char so it differs from computername
+        *ret = '#';
+	return ret;
+}
+
+HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  DWORD idThread
+)
+{
+    HKL ret = Old_GetKeyboardLayout(idThread);
+    LOQ_nonnull("misc", "p", "KeyboardLayout", (DWORD)ret & 0xFFFF);
     return ret;
 }

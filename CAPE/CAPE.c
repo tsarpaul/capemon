@@ -105,6 +105,8 @@ typedef struct _hook_info_t {
 	ULONG_PTR parent_caller_retaddr;
 } hook_info_t;
 
+extern hook_t g_hooks[];
+
 extern uint32_t path_from_handle(HANDLE handle, wchar_t *path, uint32_t path_buffer_len);
 extern wchar_t *ensure_absolute_unicode_path(wchar_t *out, const wchar_t *in);
 extern int called_by_hook(void);
@@ -112,7 +114,7 @@ extern int operate_on_backtrace(ULONG_PTR _esp, ULONG_PTR _ebp, void *extra, int
 extern unsigned int address_is_in_stack(PVOID Address);
 extern hook_info_t *hook_info();
 extern ULONG_PTR base_of_dll_of_interest;
-extern wchar_t *our_process_path;
+extern wchar_t *our_process_path_w;
 extern wchar_t *our_commandline;
 extern ULONG_PTR g_our_dll_base;
 extern DWORD g_our_dll_size;
@@ -163,7 +165,7 @@ static __inline ULONG_PTR get_stack_bottom(void)
 CRITICAL_SECTION ProcessDumpCriticalSection;
 
 //**************************************************************************************
-BOOL InsideHook(LPVOID* ReturnAddress, LPVOID Address)
+BOOL InsideMonitor(LPVOID* ReturnAddress, LPVOID Address)
 //**************************************************************************************
 {
     if ((ULONG_PTR)Address >= g_our_dll_base && (ULONG_PTR)Address < (g_our_dll_base + g_our_dll_size))
@@ -208,11 +210,15 @@ LPVOID GetReturnAddress(hook_info_t *hookinfo)
 }
 
 //**************************************************************************************
-PVOID GetHookCallerBase()
+PVOID GetHookCallerBase(hook_info_t *hookinfo)
 //**************************************************************************************
 {
     PVOID ReturnAddress, AllocationBase;
-	hook_info_t *hookinfo = hook_info();
+	if (!hookinfo)
+    {
+        DoOutputDebugString("GetHookCallerBase: hookinfo NULL.\n");
+        hookinfo = hook_info();
+    }
 
     if (hookinfo->main_caller_retaddr)
         ReturnAddress = (PVOID)hookinfo->main_caller_retaddr;
@@ -2161,7 +2167,7 @@ void init_CAPE()
     CapeMetaData = (PCAPEMETADATA)malloc(sizeof(CAPEMETADATA));
     CapeMetaData->Pid = GetCurrentProcessId();    
     CapeMetaData->ProcessPath = (char*)malloc(MAX_PATH);
-    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path, (int)wcslen(our_process_path)+1, CapeMetaData->ProcessPath, MAX_PATH, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path_w, (int)wcslen(our_process_path_w)+1, CapeMetaData->ProcessPath, MAX_PATH, NULL, NULL);
     
     CommandLine = (char*)malloc(MAX_PATH);
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_commandline, (int)wcslen(our_commandline)+1, CommandLine, MAX_PATH, NULL, NULL);

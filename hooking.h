@@ -112,6 +112,7 @@ typedef struct _hook_t {
 	int is_hooked;
 
 	hook_data_t *hookdata;
+    const wchar_t *exportdirectory;
 } hook_t;
 
 typedef struct _hook_info_t {
@@ -129,11 +130,7 @@ typedef struct _hook_info_t {
 typedef struct _lasterror_t {
 	DWORD Win32Error;
 	DWORD NtstatusError;
-#ifdef _WIN64
-unsigned __int64 Eflags;
-#else
-unsigned     int Eflags;
-#endif
+	DWORD Eflags;
 } lasterror_t;
 
 int lde(void *addr);

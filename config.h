@@ -106,6 +106,7 @@ struct _g_config {
 	wchar_t *excluded_dllnames[EXCLUSION_MAX];
 	char *base_on_apiname[EXCLUSION_MAX];
  	char *dump_on_apinames[EXCLUSION_MAX];
+    int dump_on_api_type;
 
     // should we dump each process on exit/analysis timeout?
     int procdump;
@@ -117,9 +118,20 @@ struct _g_config {
     // should we terminate processes after dumping on terminate_event?
     int terminate_processes;
 
+    // To specify dump type code
+#ifdef CAPE_TRACE
+	char *break_on_apiname;
+	char *break_on_modname;
     char break_on_return[MAX_PATH];
+    BOOLEAN break_on_return_set;
+    BOOLEAN break_on_apiname_set;
 
+    int dumptype0;
     int trace_all;
+    int step_out;
+    int file_offsets;
+    int divert_debugger_log;
+#endif
 
     char *trace_into_api[EXCLUSION_MAX];
 };

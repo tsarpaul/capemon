@@ -880,6 +880,11 @@ extern HOOKDEF(NTSTATUS, WINAPI, NtOpenMutant,
     __in        POBJECT_ATTRIBUTES ObjectAttributes
 );
 
+extern HOOKDEF(NTSTATUS, WINAPI, NtReleaseMutant,
+    __in        HANDLE MutantHandle,
+    __out_opt   PLONG PreviousCount
+);
+
 extern HOOKDEF(NTSTATUS, WINAPI, NtCreateEvent,
 	__out		PHANDLE EventHandle,
 	__in		ACCESS_MASK DesiredAccess,
@@ -2798,6 +2803,17 @@ extern HOOKDEF(BOOL, WINAPI, CryptHashSessionKey,
     _In_     DWORD dwFlags
 );
 
+extern HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
+  LPCWSTR   lpFileName,
+  PVOID     *pUsers
+);
+
+extern HOOKDEF(BOOL, WINAPI, CryptGenRandom,
+    HCRYPTPROV hProv,
+    DWORD      dwLen,
+    BYTE       *pbBuffer
+);
+
 //
 // Special Hooks
 //
@@ -3025,17 +3041,30 @@ extern HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
     IN const DVTARGETDEVICE *ptd
 );
 
-extern HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
-  LPCWSTR   lpFileName,
-  PVOID     *pUsers
-);
-
-extern HOOKDEF(NTSTATUS, WINAPI, NtContinue,
-  IN PCONTEXT ThreadContext,
-  IN BOOLEAN  RaiseAlert
-);
-
 extern HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
-  UINT  message,
-  DWORD dwFlag
+	UINT  message,
+	DWORD dwFlag
+);
+
+extern HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+);
+
+extern HOOKDEF(BOOL, WINAPI, CryptImportKey,
+    HCRYPTPROV hProv,
+    const BYTE *pbData,
+    DWORD      dwDataLen,
+    HCRYPTKEY  hPubKey,
+    DWORD      dwFlags,
+    HCRYPTKEY  *phKey
+);
+
+extern HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+);
+
+extern HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  _In_ DWORD idThread
 );

@@ -976,6 +976,19 @@ void ShowStack(DWORD_PTR StackPointer, unsigned int NumberOfRecords)
 }
 
 //**************************************************************************************
+BOOL CAPEExceptionDispatcher(PEXCEPTION_RECORD ExceptionRecord, PCONTEXT Context)
+//**************************************************************************************
+{
+    struct _EXCEPTION_POINTERS ExceptionInfo;
+    ExceptionInfo.ExceptionRecord = ExceptionRecord;
+    ExceptionInfo.ContextRecord = Context;
+    if (CAPEExceptionFilter(&ExceptionInfo) == EXCEPTION_CONTINUE_EXECUTION)
+        return TRUE;
+    else
+        return FALSE;
+}
+
+//**************************************************************************************
 LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
 //**************************************************************************************
 {
@@ -1011,6 +1024,7 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
             }
         }
 
+
         // If not it's a single-step
         if (!BreakpointFlag)
         {
@@ -1026,10 +1040,8 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
                 ResumeAfterExecutionBreakpoint(ExceptionInfo->ContextRecord, pBreakpointInfo);
             }
             else
-            {
-                DoOutputDebugString("CAPEExceptionFilter: Error, unhandled single-step exception at: 0x%x\n", ExceptionInfo->ExceptionRecord->ExceptionAddress);
+                // pass it on
                 return EXCEPTION_CONTINUE_SEARCH;
-            }
 
             return EXCEPTION_CONTINUE_EXECUTION;
         }
@@ -1191,25 +1203,11 @@ LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo)
         DoOutputDebugString("CAPEExceptionFilter: DBG_PRINTEXCEPTION_C at 0x%x (0x%x).\n", ExceptionInfo->ExceptionRecord->ExceptionInformation[1], ExceptionInfo->ExceptionRecord->ExceptionInformation[0]);
         return EXCEPTION_CONTINUE_SEARCH;
     }
-    else if (!VECTORED_HANDLER && OriginalExceptionHandler)
-    {
-        if ((ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress >= g_our_dll_base && (ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress < (g_our_dll_base + g_our_dll_size))
-        {
-            // This is a CAPE (or Cuckoo) exception
-            return EXCEPTION_EXECUTE_HANDLER;
-        }
-
-        // As it's not a bp, and the sample has registered its own handler
-        // we return EXCEPTION_EXECUTE_HANDLER
-        DoOutputDebugString("CAPEExceptionFilter: Non-breakpoint exception caught, passing to sample's handler.\n");
-        SetUnhandledExceptionFilter(OriginalExceptionHandler);
-        return EXCEPTION_EXECUTE_HANDLER;
-    }
     else if (VECTORED_HANDLER && SampleVectoredHandler)
     {
         // As it's not a bp and the sample has registered its own handler
         //DoOutputDebugString("CAPEExceptionFilter: Non-breakpoint exception caught, passing to sample's vectored handler.\n");
-        SampleVectoredHandler(ExceptionInfo);
+        return SampleVectoredHandler(ExceptionInfo);
     }
 
     if ((ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress >= g_our_dll_base && (ULONG_PTR)ExceptionInfo->ExceptionRecord->ExceptionAddress < (g_our_dll_base + g_our_dll_size))
@@ -1626,7 +1624,7 @@ BOOL ClearAllBreakpoints()
 
         if (!GetThreadContext(CurrentThreadBreakpoint->ThreadHandle, &Context))
         {
-            DoOutputDebugString("ClearAllBreakpoints: Error getting thread context (thread %d).\n", CurrentThreadBreakpoint->ThreadId);
+            DoOutputDebugString("ClearAllBreakpoints: Error getting thread context (thread %d, handle 0x%x).\n", CurrentThreadBreakpoint->ThreadId, CurrentThreadBreakpoint->ThreadHandle);
             return FALSE;
         }
 
@@ -2587,15 +2585,7 @@ BOOL SetThreadBreakpoint
 	pBreakpointInfo->Callback       = Callback;
 
     if (VECTORED_HANDLER)
-    {
         CAPEExceptionFilterHandle = AddVectoredExceptionHandler(1, CAPEExceptionFilter);
-        OriginalExceptionHandler = NULL;
-    }
-    else
-    {
-        OriginalExceptionHandler = SetUnhandledExceptionFilter(CAPEExceptionFilter);
-        CAPEExceptionFilterHandle = NULL;
-    }
 
     __try
     {
@@ -2846,7 +2836,7 @@ BOOL InitialiseDebugger(void)
     ChildProcessId = 0;
     SingleStepHandler = NULL;
     SampleVectoredHandler = NULL;
-    VECTORED_HANDLER = TRUE;
+    VECTORED_HANDLER = FALSE;
 
 #ifndef _WIN64
     // Ensure wow64 patch is installed if needed
@@ -2855,15 +2845,7 @@ BOOL InitialiseDebugger(void)
 
     // Set up handler to catch breakpoint exceptions
     if (VECTORED_HANDLER)
-    {
         CAPEExceptionFilterHandle = AddVectoredExceptionHandler(1, CAPEExceptionFilter);
-        OriginalExceptionHandler = NULL;
-    }
-    else    // deprecated alternative via unhandled exception filter
-    {
-        OriginalExceptionHandler = SetUnhandledExceptionFilter(CAPEExceptionFilter);
-        CAPEExceptionFilterHandle = NULL;
-    }
 
     // Global switch for guard pages
     GuardPagesDisabled = TRUE;

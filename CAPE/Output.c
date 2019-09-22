@@ -35,18 +35,15 @@ extern char* GetResultsPath(char* FolderName);
 extern struct CapeMetadata *CapeMetaData;
 extern ULONG_PTR base_of_dll_of_interest;
 #ifdef CAPE_TRACE
-extern SIZE_T LastWriteLength;
 HANDLE DebuggerLog;
+extern SIZE_T LastWriteLength;
+extern BOOL StopTrace;
 #endif
 
 //**************************************************************************************
-void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...)
+void OutputString(_In_ LPCTSTR lpOutputString, va_list args)
 //**************************************************************************************
 {
-    va_list args;
-
-    va_start(args, lpOutputString);
-
     memset(DebugOutput, 0, MAX_PATH*sizeof(CHAR));
     _vsntprintf_s(DebugOutput, MAX_PATH, _TRUNCATE, lpOutputString, args);
 #ifdef STANDALONE
@@ -56,8 +53,17 @@ void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...)
     _sntprintf_s(PipeOutput, MAX_PATH, _TRUNCATE, "DEBUG:%s", DebugOutput);
     pipe(PipeOutput, strlen(PipeOutput));
 #endif
-    va_end(args);
+    return;
+}
 
+//**************************************************************************************
+void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...)
+//**************************************************************************************
+{
+    va_list args;
+    va_start(args, lpOutputString);
+    OutputString(lpOutputString, args);
+    va_end(args);
 	return;
 }
 
@@ -251,6 +257,13 @@ void DebuggerOutput(_In_ LPCTSTR lpOutputString, ...)
 
     va_start(args, lpOutputString);
 
+    if (g_config.divert_debugger_log)
+    {
+        OutputString(lpOutputString, args);
+        va_end(args);
+        return;
+    }
+
     char *FullPathName,*OutputFilename;
 
     FullPathName = GetResultsPath("debugger");
@@ -269,7 +282,7 @@ void DebuggerOutput(_In_ LPCTSTR lpOutputString, ...)
 
     free(OutputFilename);
 
-    if (!DebuggerLog)
+    if (!DebuggerLog && !StopTrace)
     {
         time_t Time;
         CHAR TimeBuffer[64];
@@ -290,6 +303,12 @@ void DebuggerOutput(_In_ LPCTSTR lpOutputString, ...)
         WriteFile(DebuggerLog, DebuggerLine, (DWORD)strlen(DebuggerLine), (LPDWORD)&LastWriteLength, NULL);
         while (*lpOutputString == 0x0a)
             lpOutputString++;
+    }
+    else if (StopTrace)
+    {
+        CloseHandle(DebuggerLog);
+        va_end(args);
+        return;
     }
 
     memset(DebuggerLine, 0, MAX_PATH*sizeof(CHAR));

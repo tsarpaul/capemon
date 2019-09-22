@@ -28,7 +28,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern int DoProcessDump(PVOID CallerBase);
 extern ULONG_PTR base_of_dll_of_interest;
-extern PVOID GetHookCallerBase();
+extern PVOID GetHookCallerBase(hook_info_t *hookinfo);
 #ifdef CAPE_INJECTION
 extern void CreateProcessHandler(LPWSTR lpApplicationName, LPWSTR lpCommandLine, LPPROCESS_INFORMATION lpProcessInformation);
 #endif
@@ -124,7 +124,7 @@ HOOKDEF_NOTAIL(WINAPI, LdrUnloadDll,
 	PVOID DllImageBase
 ) {
     if (DllImageBase && DllImageBase == (PVOID)base_of_dll_of_interest)
-        DoProcessDump(GetHookCallerBase());
+        DoProcessDump(GetHookCallerBase(NULL));
 
     if (DllImageBase && DllImageBase != LastDllUnload)
     {

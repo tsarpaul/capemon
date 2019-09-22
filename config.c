@@ -22,9 +22,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "misc.h"
 #include "log.h"
 #include "hooking.h"
+#include "Shlwapi.h"
 
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
-extern PVOID bp0, bp1, bp2, bp3;
+extern char *our_dll_path;
+extern wchar_t *our_process_path_w;
 #ifdef CAPE_TRACE
 #define BP_EXEC        0x00
 #define BP_WRITE       0x01
@@ -33,26 +35,41 @@ extern PVOID bp0, bp1, bp2, bp3;
 #define DoClearZeroFlag 1
 #define DoSetZeroFlag   2
 #define PrintEAX        3
+extern PVOID bp0, bp1, bp2, bp3;
 extern int TraceDepthLimit, EntryPointRegister;
-extern unsigned int StepLimit, Action0, Action1, Action2, Action3;
-extern unsigned int Type0, Type1, Type2, Type3;
-extern char *Instruction0, *Instruction1, *Instruction2, *Instruction3;
+extern unsigned int StepLimit, Type0, Type1, Type2, Type3;
+extern char Action0[MAX_PATH], Action1[MAX_PATH], Action2[MAX_PATH], Action3[MAX_PATH], *Instruction0, *Instruction1, *Instruction2, *Instruction3;
+extern char DumpSizeString[MAX_PATH];
+extern SIZE_T DumpSize;
 #endif
 
 int read_config(void)
 {
-    // TODO unicode support
-    char buf[32768], config_fname[MAX_PATH];
+    char buf[32768], config_fname[MAX_PATH], analyzer_path[MAX_PATH];
 	FILE *fp;
 	unsigned int i;
 	unsigned int vallen;
 
-    sprintf(config_fname, "C:\\%u.ini", GetCurrentProcessId());
+    // look for the config in analyzer directory
+    strncpy(analyzer_path, our_dll_path, strlen(our_dll_path));
+    PathRemoveFileSpec(analyzer_path); // remove filename
+    PathRemoveFileSpec(analyzer_path); // remove dll folder
+    sprintf(config_fname, "%s\\%u.ini", analyzer_path, GetCurrentProcessId());
 
     fp = fopen(config_fname, "r");
+
+    // backward compatibility
 	if (fp == NULL) {
-		// for debugging purposes
-		fp = fopen("C:\\config.ini", "r");
+        memset(config_fname, 0, sizeof(config_fname));
+        sprintf(config_fname, "C:\\%u.ini", GetCurrentProcessId());
+		fp = fopen(config_fname, "r");
+    }
+
+    // for debugging purposes
+    if (fp == NULL) {
+        memset(config_fname, 0, sizeof(config_fname));
+        sprintf(config_fname, "%s\\config.ini", analyzer_path);
+		fp = fopen(config_fname, "r");
 		if (fp == NULL)
 			return 0;
 	}
@@ -68,6 +85,7 @@ int read_config(void)
 
 #ifdef CAPE_TRACE
     EntryPointRegister = 0;
+    TraceDepthLimit = 0xFFFFFFFF;
 #endif
 
 	memset(buf, 0, sizeof(buf));
@@ -87,21 +105,21 @@ int read_config(void)
 
 			*p = 0;
 			vallen = (unsigned int)strlen(value);
-            if(!stricmp(key, "pipe")) {
+            if(!strcmp(key, "pipe")) {
 				for (i = 0; i < vallen; i++)
 					g_config.pipe_name[i] = (wchar_t)(unsigned short)value[i];
             }
-			else if (!stricmp(key, "logserver")) {
+			else if (!strcmp(key, "logserver")) {
 				strncpy(g_config.logserver, value,
 					ARRAYSIZE(g_config.logserver));
 			}
-			else if (!stricmp(key, "results")) {
+			else if (!strcmp(key, "results")) {
                 strncpy(g_config.results, value,
                     ARRAYSIZE(g_config.results) - 1);
 				for (i = 0; i < ARRAYSIZE(g_config.results); i++)
 					g_config.w_results[i] = (wchar_t)(unsigned short)g_config.results[i];
 			}
-			else if (!stricmp(key, "file-of-interest")) {
+			else if (!strcmp(key, "file-of-interest")) {
 				unsigned int len = (unsigned int)strlen(value);
 				if (len > 1) {
 					if (value[1] == ':') {
@@ -112,7 +130,7 @@ int read_config(void)
 						g_config.file_of_interest = ascii_to_unicode_dup(tmp);
 						free(tmp);
 						// if the file of interest is our own executable, then don't do any special handling
-						if (wcsicmp(our_process_path, g_config.file_of_interest))
+						if (wcsicmp(our_process_path_w, g_config.file_of_interest))
 							g_config.suspend_logging = TRUE;
 					}
 					else {
@@ -122,11 +140,11 @@ int read_config(void)
 					}
 				}
 			}
-			else if (!stricmp(key, "referrer")) {
+			else if (!strcmp(key, "referrer")) {
 				g_config.w_referrer = ascii_to_unicode_dup(value);
 				g_config.referrer = strdup(value);
 			}
-			else if (!stricmp(key, "analyzer")) {
+			else if (!strcmp(key, "analyzer")) {
                 strncpy(g_config.analyzer, value,
                     ARRAYSIZE(g_config.analyzer)-1);
 				for (i = 0; i < ARRAYSIZE(g_config.analyzer); i++)
@@ -135,78 +153,78 @@ int read_config(void)
 				if (wcslen(g_config.dllpath) < ARRAYSIZE(g_config.dllpath) - 5)
 					wcscat(g_config.dllpath, L"\\dll\\");
             }
-            else if(!stricmp(key, "shutdown-mutex")) {
+            else if(!strcmp(key, "shutdown-mutex")) {
                 strncpy(g_config.shutdown_mutex, value,
                     ARRAYSIZE(g_config.shutdown_mutex));
             }
-            else if(!stricmp(key, "first-process")) {
+            else if(!strcmp(key, "first-process")) {
                 g_config.first_process = value[0] == '1';
             }
-            else if(!stricmp(key, "startup-time")) {
+            else if(!strcmp(key, "startup-time")) {
                 g_config.startup_time = atoi(value);
             }
-			else if (!stricmp(key, "debug")) {
+			else if (!strcmp(key, "debug")) {
 				g_config.debug = atoi(value);
 			}
-			else if (!stricmp(key, "hook-type")) {
+			else if (!strcmp(key, "hook-type")) {
 #ifndef _WIN64
-				if (!stricmp(value, "direct"))
+				if (!strcmp(value, "direct"))
 					g_config.hook_type = HOOK_JMP_DIRECT;
-				else if (!stricmp(value, "indirect"))
+				else if (!strcmp(value, "indirect"))
 					g_config.hook_type = HOOK_JMP_INDIRECT;
-				else if (!stricmp(value, "safe"))
+				else if (!strcmp(value, "safe"))
 					g_config.hook_type = HOOK_SAFEST;
 #endif
 			}
-			else if (!stricmp(key, "disable_hook_content")) {
+			else if (!strcmp(key, "disable_hook_content")) {
 				g_config.disable_hook_content = atoi(value);
 			}
 			/*
-			else if(!stricmp(key, "host-ip")) {
+			else if(!strcmp(key, "host-ip")) {
                 g_config.host_ip = inet_addr(value);
             }
-            else if(!stricmp(key, "host-port")) {
+            else if(!strcmp(key, "host-port")) {
                 g_config.host_port = atoi(value);
             }
 			*/
-            else if(!stricmp(key, "force-sleepskip")) {
+            else if(!strcmp(key, "force-sleepskip")) {
                 g_config.force_sleepskip = value[0] == '1';
             }
-			else if (!stricmp(key, "serial")) {
+			else if (!strcmp(key, "serial")) {
 				g_config.serial_number = (unsigned int)strtoul(value, NULL, 16);
 			}
-			else if (!stricmp(key, "sysvol_ctimelow")) {
+			else if (!strcmp(key, "sysvol_ctimelow")) {
 				g_config.sysvol_ctime.dwLowDateTime = (unsigned int)strtoul(value, NULL, 16);
 			}
-			else if (!stricmp(key, "sysvol_ctimehigh")) {
+			else if (!strcmp(key, "sysvol_ctimehigh")) {
 				g_config.sysvol_ctime.dwHighDateTime = (unsigned int)strtoul(value, NULL, 16);
 			}
-			else if (!stricmp(key, "sys32_ctimelow")) {
+			else if (!strcmp(key, "sys32_ctimelow")) {
 				g_config.sys32_ctime.dwLowDateTime = (unsigned int)strtoul(value, NULL, 16);
 			}
-			else if (!stricmp(key, "sys32_ctimehigh")) {
+			else if (!strcmp(key, "sys32_ctimehigh")) {
 				g_config.sys32_ctime.dwHighDateTime = (unsigned int)strtoul(value, NULL, 16);
 			}
-			else if (!stricmp(key, "full-logs")) {
+			else if (!strcmp(key, "full-logs")) {
 				g_config.full_logs = value[0] == '1';
 			}
-			else if (!stricmp(key, "force-flush")) {
+			else if (!strcmp(key, "force-flush")) {
 				g_config.force_flush = atoi(value);
 			}
-			else if (!stricmp(key, "terminate-event")) {
+			else if (!strcmp(key, "terminate-event")) {
 				strncpy(g_config.terminate_event_name, value,
 					ARRAYSIZE(g_config.terminate_event_name));
 			}
-			else if (!stricmp(key, "no-stealth")) {
+			else if (!strcmp(key, "no-stealth")) {
 				g_config.no_stealth = value[0] == '1';
 			}
-			else if (!stricmp(key, "buffer-max")) {
+			else if (!strcmp(key, "buffer-max")) {
 				buffer_log_max = (unsigned int)strtoul(value, NULL, 10);
 			}
-			else if (!stricmp(key, "large-buffer-max")) {
+			else if (!strcmp(key, "large-buffer-max")) {
 				large_buffer_log_max = (unsigned int)strtoul(value, NULL, 10);
 			}
-			else if (!stricmp(key, "exclude-apis")) {
+			else if (!strcmp(key, "exclude-apis")) {
 				unsigned int x = 0;
 				char *p2;
 				p = value;
@@ -221,7 +239,7 @@ int read_config(void)
 					p = p2 + 1;
 				}
 			}
-			else if (!stricmp(key, "exclude-dlls")) {
+			else if (!strcmp(key, "exclude-dlls")) {
 				unsigned int x = 0;
 				char *p2;
 				p = value;
@@ -236,7 +254,7 @@ int read_config(void)
 					p = p2 + 1;
 				}
 			}
-			else if (!stricmp(key, "base-on-api")) {
+			else if (!strcmp(key, "base-on-api")) {
 				unsigned int x = 0;
 				char *p2;
 				p = value;
@@ -246,13 +264,13 @@ int read_config(void)
 						*p2 = '\0';
 					}
 					g_config.base_on_apiname[x++] = strdup(p);
-                    DoOutputDebugString("Config: Added '%s' to base-on-API list.\n", p);
+                    DoOutputDebugString("Added '%s' to base-on-API list.\n", p);
 					if (p2 == NULL)
 						break;
 					p = p2 + 1;
 				}
 			}
-			else if (!stricmp(key, "dump-on-api")) {
+			else if (!strcmp(key, "dump-on-api")) {
 				unsigned int x = 0;
 				char *p2;
 				p = value;
@@ -262,31 +280,48 @@ int read_config(void)
 						*p2 = '\0';
 					}
 					g_config.dump_on_apinames[x++] = strdup(p);
-                    DoOutputDebugString("Config: Added '%s' to dump-on-API list.\n", p);
+                    DoOutputDebugString("Added '%s' to dump-on-API list.\n", p);
 					if (p2 == NULL)
 						break;
 					p = p2 + 1;
 				}
 			}
+			else if (!strcmp(key, "dump-on-api-type")) {
+                g_config.dump_on_api_type = (unsigned int)strtoul(value, NULL, 0);
+            }
 #ifdef CAPE_TRACE
+            else if (!strcmp(key, "file-offsets")) {
+				g_config.file_offsets = value[0] == '1';
+                if (g_config.file_offsets)
+                    DoOutputDebugString("Breakpoints interpreted as file offsets.\n");
+			}
             else if (!stricmp(key, "bp0")) {
-				char *p2;
-				p = value;
-                p2 = strchr(p, ':');
-                if (p2 && *(p2+1) == ':') {
+				char *p;
+                p = strchr(value, ':');
+                if (p && *(p+1) == ':') {
                     bp0 = 0;
-                    *p2 = '\0';
-                    *(p2+1) = '\0';
+                    *p = '\0';
+                    *(p+1) = '\0';
                     HANDLE Module = GetModuleHandle(value);
+                    g_config.break_on_apiname = strdup(p+2);
+                    g_config.break_on_modname = strdup(value);
                     if (Module)
-                        bp0 = GetProcAddress(Module, p2+2);
+                        bp0 = GetProcAddress(Module, p+2);
                     else
-                        DoOutputDebugString("Config: Failed to get base for module (%s).\n", value);
+                        DoOutputDebugString("Config: Failed to get base for module (%s).\n", g_config.break_on_modname);
                     if (bp0) {
-                        DoOutputDebugString("Config: bp0 set to 0x%p (%s::%s).\n", bp0, value, p2+2);
+                        g_config.break_on_apiname_set = TRUE;
+                        DoOutputDebugString("Config: bp0 set to 0x%p (%s::%s).\n", bp0, g_config.break_on_modname, g_config.break_on_apiname);
                     }
-                    else
-                        DoOutputDebugString("Config: Failed to get address for function %s::%s.\n", value, p2+2);
+                    else {
+                        bp0 = (PVOID)(DWORD_PTR)strtoul(p+2, NULL, 0);
+                        if (bp0) {
+                            g_config.break_on_apiname_set = TRUE;
+                            DoOutputDebugString("Config: bp0 set to 0x%p (%s::%s).\n", bp0, g_config.break_on_modname, g_config.break_on_apiname);
+                        }
+                        else
+                            DoOutputDebugString("Config: Failed to get address for function %s::%s.\n", g_config.break_on_modname, g_config.break_on_apiname);
+                    }
                 }
                 else if (!strncmp(value, "ep", 2)) {
                     DoOutputDebugString("Config: bp0 set to entry point.\n", bp0);
@@ -294,7 +329,7 @@ int read_config(void)
                 }
                 else {
                     bp0 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("Config: bp0 set to 0x%x.\n", bp0);
+                    DoOutputDebugString("Config: bp0 set to 0x%x. (%s)\n", bp0, value);
                 }
 			}
             else if (!stricmp(key, "bp1")) {
@@ -335,29 +370,25 @@ int read_config(void)
 				StepLimit = (unsigned int)strtoul(value, NULL, 10);
                 DoOutputDebugString("Config: Trace instruction count set to 0x%x", StepLimit);
 			}
-            else if (!stricmp(key, "action0")) {
-				if (!stricmp(value, "ClearZeroFlag")){
-                    Action0 = DoClearZeroFlag;
-                    DoOutputDebugString("Config: Action0 set to DoClearZeroFlag.");
-                }
-				else if (!stricmp(value, "SetZeroFlag")){
-                    Action0 = DoSetZeroFlag;
-                    DoOutputDebugString("Config: Action0 set to DoSetZeroFlag.");
-                }
-				else if (!stricmp(value, "PrintEAX")){
-                    Action0 = PrintEAX;
-                    DoOutputDebugString("Config: Action0 set to PrintEAX.");
+            else if (!stricmp(key, "step-out")) {
+                bp0 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
+				if (bp0) {
+                    g_config.step_out = '1';
+                    DoOutputDebugString("Config: Step-out breakpoint set to 0x%x.\n", bp0);
                 }
 			}
-            else if (!stricmp(key, "action1")) {
-				if (!stricmp(value, "ClearZeroFlag")){
-                    Action1 = DoClearZeroFlag;
-                    DoOutputDebugString("Config: Action1 set to DoClearZeroFlag.");
+            else if (!stricmp(key, "dumpsize")) {
+				DumpSize = (int)strtoul(value, NULL, 10);
+                if (DumpSize)
+                    DoOutputDebugString("Config: DumpSize set to 0x%x", DumpSize);
+                else {
+                    strncpy(DumpSizeString, value, strlen(value));
+                    DoOutputDebugString("Config: DumpSize set to %s.", DumpSizeString);
                 }
-				else if (!stricmp(value, "SetZeroFlag")){
-                    Action1 = DoSetZeroFlag;
-                    DoOutputDebugString("Config: Action1 set to DoSetZeroFlag.");
-                }
+			}
+            else if (!stricmp(key, "action0")) {
+                strncpy(Action0, value, strlen(value));
+                DoOutputDebugString("Config: Action0 set to %s.", Action0);
 			}
             else if (!stricmp(key, "instruction0")) {
                 Instruction0 = calloc(1, MAX_PATH);
@@ -371,6 +402,7 @@ int read_config(void)
 			}
             else if (!stricmp(key, "break-on-return")) {
 				strncpy(g_config.break_on_return, value, ARRAYSIZE(g_config.break_on_return));
+                g_config.break_on_return_set = TRUE;
                 DoOutputDebugString("Config: Break-on-return set to %s.", g_config.break_on_return);
 			}
             else if (!stricmp(key, "trace-all")) {
@@ -394,6 +426,9 @@ int read_config(void)
 					p = p2 + 1;
 				}
 			}
+			else if (!strcmp(key, "dumptype0")) {
+                g_config.dumptype0 = (unsigned int)strtoul(value, NULL, 0);
+            }
             else if (!stricmp(key, "type0")) {
                 if (!strnicmp(value, "w", 1)) {
                     DoOutputDebugString("Config: Breakpoint 0 type set to write (Type0 = BP_WRITE).\n");
@@ -408,40 +443,45 @@ int read_config(void)
                     Type0 = BP_EXEC;
                 }
 			}
+            else if (!strcmp(key, "divert-debugger-log")) {
+				g_config.divert_debugger_log = value[0] == '1';
+                if (g_config.divert_debugger_log)
+                    DoOutputDebugString("Debugger log diverted (to analysis log).\n");
+			}
 #endif
-            else if (!stricmp(key, "procdump")) {
+            else if (!strcmp(key, "procdump")) {
 				g_config.procdump = value[0] == '1';
                 if (g_config.procdump)
-                    DoOutputDebugString("Config: Process dumps enabled.\n");
+                    DoOutputDebugString("Process dumps enabled.\n");
                 else
-                    DoOutputDebugString("Config: Process dumps disabled.\n");
+                    DoOutputDebugString("Process dumps disabled.\n");
 			}
-            else if (!stricmp(key, "procmemdump")) {
+            else if (!strcmp(key, "procmemdump")) {
 				// for backwards compatibility with spender
-                if (!stricmp(value, "yes"))
+                if (!strcmp(value, "yes"))
                     g_config.procmemdump = 1;
                 else
                     g_config.procmemdump = value[0] == '1';
                 if (g_config.procmemdump)
-                    DoOutputDebugString("Config: Full process memory dumps enabled.\n");
+                    DoOutputDebugString("Full process memory dumps enabled.\n");
                 else
-                    DoOutputDebugString("Config: Full process memory dumps disabled.\n");
+                    DoOutputDebugString("Full process memory dumps disabled.\n");
 			}
-            else if (!stricmp(key, "import_reconstruction")) {
+            else if (!strcmp(key, "import_reconstruction")) {
 				g_config.import_reconstruction = value[0] == '1';
                 if (g_config.import_reconstruction)
-                    DoOutputDebugString("Config: Import reconstruction of process dumps enabled.\n");
+                    DoOutputDebugString("Import reconstruction of process dumps enabled.\n");
                 else
-                    DoOutputDebugString("Config: Import reconstruction of process dumps disabled.\n");
+                    DoOutputDebugString("Import reconstruction of process dumps disabled.\n");
 			}
-            else if (!stricmp(key, "terminate-processes")) {
+            else if (!strcmp(key, "terminate-processes")) {
 				g_config.terminate_processes = value[0] == '1';
                 if (g_config.terminate_processes)
-                    DoOutputDebugString("Config: Terminate processes on terminate_event enabled.\n");
+                    DoOutputDebugString("Terminate processes on terminate_event enabled.\n");
                 else
-                    DoOutputDebugString("Config: Terminate processes on terminate_event disabled.\n");
+                    DoOutputDebugString("Terminate processes on terminate_event disabled.\n");
 			}
-            else DoOutputDebugString("Config: CAPE debug - unrecognised key %s.\n", key);
+            else DoOutputDebugString("CAPE debug - unrecognised key %s.\n", key);
 		}
     }
 
