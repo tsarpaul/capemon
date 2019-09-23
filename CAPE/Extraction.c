@@ -2342,7 +2342,7 @@ BOOL AddressOfEPWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION
 
             if (!ContextSetNextAvailableBreakpoint(ExceptionInfo->ContextRecord, &Register, sizeof(BYTE), FinalByteAddress, BP_WRITE, FinalByteWriteCallback))
             {
-                DoOutputDebugString("AddressOfEPWriteCallback: SetNextAvailableBreakpoint failed to set write bp on final section, last byte: 0x%p.\n", *(PBYTE)FinalByteAddress);
+                DoOutputDebugString("AddressOfEPWriteCallback: SetNextAvailableBreakpoint failed to set write bp on final section, (address: 0x%p).\n", FinalByteAddress);
                 return FALSE;
             }
 
