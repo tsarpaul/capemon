@@ -449,6 +449,7 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
         TraceDepthCount--;
 #endif
     }
+#ifndef _WIN64
     else if (!strcmp(DecodedInstruction.mnemonic.p, "CALL FAR") && !strncmp(DecodedInstruction.operands.p, "0x33", 4))
     {
         ReturnAddress = (PVOID)((PUCHAR)CIP + DecodedInstruction.size);
@@ -460,13 +461,10 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
         ClearSingleStepMode(ExceptionInfo->ContextRecord);
 
         if (!FilterTrace)
-#ifdef _WIN64
-            DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", (char*)DecodedInstruction.operands.p);
-#else
             DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", (unsigned int)CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", (char*)DecodedInstruction.operands.p);
-#endif
         return TRUE;
     }
+#endif
     else if (!FilterTrace)
 #ifdef _WIN64
         DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", (char*)DecodedInstruction.operands.p);
