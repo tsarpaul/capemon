@@ -179,7 +179,7 @@ HOOKDEF(NTSTATUS, WINAPI, LdrGetProcedureAddress,
         "Ordinal", Ordinal, "FunctionAddress", FunctionAddress);
 
 	if (hook_info()->main_caller_retaddr && g_config.first_process && FunctionName != NULL && (ret == 0xc000007a || ret == 0xc0000139) && FunctionName->Length == 7 &&
-		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path, g_config.file_of_interest)) {
+		!strncmp(FunctionName->Buffer, "DllMain", 7) && wcsicmp(our_process_path_w, g_config.file_of_interest)) {
 		log_flush();
 		ExitThread(0);
 	}
@@ -1402,4 +1402,127 @@ HOOKDEF(BOOL, WINAPI, RtlSetCurrentTransaction,
 	BOOL ret = Old_RtlSetCurrentTransaction(TransactionHandle);
 	LOQ_bool("misc", "p", "TransactionHandle", TransactionHandle);
 	return ret;
+}
+
+HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
+    IN LPOLESTREAM          lpolestream,
+    OUT LPSTORAGE           pstg,
+    IN const DVTARGETDEVICE *ptd
+) {
+    void *buf = NULL; uintptr_t len = 0;
+
+    HRESULT ret = Old_OleConvertOLESTREAMToIStorage(lpolestream, pstg, ptd);
+
+#ifndef _WIN64
+    if (lpolestream != NULL) {
+        buf = (PVOID)*((uint8_t *) lpolestream + 8);
+        len = *((uint8_t *) lpolestream + 12);
+    }
+#endif
+
+	LOQ_bool("misc", "b", "OLE2", len, buf);
+	return ret;
+}
+
+HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+)
+{
+    HANDLE ret;
+    ret = Old_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
+    LOQ_nonnull("misc", "ihh", "Options", flOptions, "InitialSize", dwInitialSize, "MaximumSize", dwMaximumSize);
+    return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, FlsAlloc,
+	_In_ PFLS_CALLBACK_FUNCTION lpCallback
+) {
+	BOOL ret = Old_FlsAlloc(lpCallback);
+	LOQ_bool("misc", "p", "Callback", lpCallback);
+	return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, FlsSetValue,
+	_In_     DWORD dwFlsIndex,
+	_In_opt_ PVOID lpFlsData
+) {
+	BOOL ret = Old_FlsSetValue(dwFlsIndex, lpFlsData);
+	LOQ_bool("misc", "ip", "Index", dwFlsIndex, "Data", lpFlsData);
+	return ret;
+}
+
+
+HOOKDEF(PVOID, WINAPI, FlsGetValue,
+	_In_     DWORD dwFlsIndex
+) {
+	PVOID ret = Old_FlsGetValue(dwFlsIndex);
+	LOQ_nonnull("misc", "ip", "Index", dwFlsIndex, "ReturnValue", ret);
+	return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, FlsFree,
+	_In_     DWORD dwFlsIndex
+) {
+	BOOL ret = Old_FlsFree(dwFlsIndex);
+	LOQ_bool("misc", "ip", "Index", dwFlsIndex);
+	return ret;
+}
+
+
+HOOKDEF(PVOID, WINAPI, LocalAlloc,
+	_In_ UINT uFlags,
+	_In_ SIZE_T uBytes)
+{
+	PVOID ret = Old_LocalAlloc(uFlags, uBytes);
+	LOQ_nonnull("misc", "ii", "Flags", uFlags, "Bytes", uBytes);
+	return ret;
+}
+
+HOOKDEF(VOID, WINAPI, LocalFree,
+	HLOCAL hMem)
+{
+	int ret = 0;
+	Old_LocalFree(hMem);
+	LOQ_void("misc", "p", "SourceBuffer", hMem);
+}
+
+#define MSGFLT_ADD 1
+#define MSGFLT_REMOVE 2
+HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+  UINT  message,
+  DWORD dwFlag
+)
+{
+	BOOL ret;
+    if (dwFlag != MSGFLT_REMOVE && dwFlag != MSGFLT_ADD) {
+        ret = FALSE;
+        SetLastError(ERROR_INVALID_PARAMETER);
+    }
+    else
+        ret = Old_ChangeWindowMessageFilter(message, dwFlag);
+	LOQ_bool("misc", "ii", "message", message, "dwFlag", dwFlag);
+	return ret;
+}
+
+HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+)
+{
+	LPWSTR ret = Old_rtcEnvironBstr(es);
+	LOQ_bool("misc", "uu", "EnvVar", es->envstr, "EnvStr", ret);
+	if (ret && !wcsicmp(es->envstr, L"userdomain"))
+        // replace first char so it differs from computername
+        *ret = '#';
+	return ret;
+}
+
+HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  DWORD idThread
+)
+{
+    HKL ret = Old_GetKeyboardLayout(idThread);
+    LOQ_nonnull("misc", "p", "KeyboardLayout", (DWORD)ret & 0xFFFF);
+    return ret;
 }

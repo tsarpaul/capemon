@@ -880,6 +880,11 @@ extern HOOKDEF(NTSTATUS, WINAPI, NtOpenMutant,
     __in        POBJECT_ATTRIBUTES ObjectAttributes
 );
 
+extern HOOKDEF(NTSTATUS, WINAPI, NtReleaseMutant,
+    __in        HANDLE MutantHandle,
+    __out_opt   PLONG PreviousCount
+);
+
 extern HOOKDEF(NTSTATUS, WINAPI, NtCreateEvent,
 	__out		PHANDLE EventHandle,
 	__in		ACCESS_MASK DesiredAccess,
@@ -1096,7 +1101,7 @@ extern HOOKDEF(NTSTATUS, WINAPI, DbgUiWaitStateChange,
 	__in_opt PLARGE_INTEGER Timeout
 );
 
-extern HOOKDEF_NOTAIL(WINAPI, RtlDispatchException,
+extern HOOKDEF(BOOLEAN, WINAPI, RtlDispatchException,
 	__in PEXCEPTION_RECORD ExceptionRecord,
 	__in PCONTEXT Context
 );
@@ -2792,6 +2797,56 @@ extern HOOKDEF(BOOL, WINAPI, CryptImportPublicKeyInfo,
 	_Out_ HCRYPTKEY             *phKey
 );
 
+extern HOOKDEF(BOOL, WINAPI, CryptHashSessionKey,
+    _In_     HCRYPTHASH hHash,
+    _In_     HCRYPTKEY hKey,
+    _In_     DWORD dwFlags
+);
+
+extern HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
+  LPCWSTR   lpFileName,
+  PVOID     *pUsers
+);
+
+extern HOOKDEF(BOOL, WINAPI, CryptGenRandom,
+    HCRYPTPROV hProv,
+    DWORD      dwLen,
+    BYTE       *pbBuffer
+);
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptImportKey,
+    NCRYPT_PROV_HANDLE hProvider,
+    NCRYPT_KEY_HANDLE  hImportKey,
+    LPCWSTR            pszBlobType,
+    NCryptBufferDesc   *pParameterList,
+    NCRYPT_KEY_HANDLE  *phKey,
+    PBYTE              pbData,
+    DWORD              cbData,
+    DWORD              dwFlags
+);
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptDecrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+);
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptEncrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+);
+
 //
 // Special Hooks
 //
@@ -3007,4 +3062,42 @@ extern HOOKDEF(NTSTATUS, WINAPI, NtCommitTransaction,
 
 extern HOOKDEF(BOOL, WINAPI, RtlSetCurrentTransaction,
     _In_ HANDLE     TransactionHandle
+);
+
+extern HOOKDEF(NTSTATUS, WINAPI, NtYieldExecution,
+    VOID
+);
+
+extern HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
+    IN LPOLESTREAM          lpolestream,
+    OUT LPSTORAGE           pstg,
+    IN const DVTARGETDEVICE *ptd
+);
+
+extern HOOKDEF(BOOL, WINAPI, ChangeWindowMessageFilter,
+	UINT  message,
+	DWORD dwFlag
+);
+
+extern HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
+	struct envstruct *es
+);
+
+extern HOOKDEF(BOOL, WINAPI, CryptImportKey,
+    HCRYPTPROV hProv,
+    const BYTE *pbData,
+    DWORD      dwDataLen,
+    HCRYPTKEY  hPubKey,
+    DWORD      dwFlags,
+    HCRYPTKEY  *phKey
+);
+
+extern HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+);
+
+extern HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  _In_ DWORD idThread
 );

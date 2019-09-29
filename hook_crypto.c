@@ -109,6 +109,7 @@ HOOKDEF(BOOL, WINAPI, CryptUnprotectMemory,
     return ret;
 }
 
+#ifndef CAPE_HANCITOR
 HOOKDEF(BOOL, WINAPI, CryptDecrypt,
     _In_     HCRYPTKEY hKey,
     _In_     HCRYPTHASH hHash,
@@ -123,6 +124,7 @@ HOOKDEF(BOOL, WINAPI, CryptDecrypt,
         "Buffer", pdwDataLen, pbData, "Length", *pdwDataLen, "Final", Final);
     return ret;
 }
+#endif
 
 HOOKDEF(BOOL, WINAPI, CryptEncrypt,
     _In_     HCRYPTKEY hKey,
@@ -350,4 +352,91 @@ HOOKDEF(BOOL, WINAPI, CryptEnumProvidersW,
 	BOOL ret = Old_CryptEnumProvidersW(dwIndex, pdwReserved, dwFlags, pdwProvType, pszProvName, pcbProvName);
 	LOQ_bool("crypto", "iu", "Index", dwIndex, "ProviderName", pszProvName);
 	return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, CryptHashSessionKey,
+    _In_     HCRYPTHASH hHash,
+    _In_     HCRYPTKEY hKey,
+    _In_     DWORD dwFlags
+) {
+    BOOL ret = Old_CryptHashSessionKey(hHash, hKey, dwFlags);
+	LOQ_bool("crypto", "pph", "CryptHash", hHash, "CryptKey", hKey, "Flags", dwFlags);
+    return ret;
+}
+
+HOOKDEF(DWORD, WINAPI, QueryUsersOnEncryptedFile,
+  LPCWSTR   lpFileName,
+  PVOID     *pUsers
+) {
+    DWORD ret = Old_QueryUsersOnEncryptedFile(lpFileName, pUsers);
+    LOQ_nonzero("crypto", "up", "FileName", lpFileName, "pUsers", pUsers);
+    return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, CryptGenRandom,
+    HCRYPTPROV hProv,
+    DWORD      dwLen,
+    BYTE       *pbBuffer
+) {
+    BOOL ret = Old_CryptGenRandom(hProv, dwLen, pbBuffer);
+    LOQ_bool("crypto", "b", "Buffer", dwLen, pbBuffer);
+    return ret;
+}
+
+HOOKDEF(BOOL, WINAPI, CryptImportKey,
+    HCRYPTPROV hProv,
+    const BYTE *pbData,
+    DWORD      dwDataLen,
+    HCRYPTKEY  hPubKey,
+    DWORD      dwFlags,
+    HCRYPTKEY  *phKey
+) {
+    BOOL ret = Old_CryptImportKey(hProv, pbData, dwDataLen, hPubKey, dwFlags, phKey);
+    LOQ_bool("crypto", "bhp", "KeyBlob", dwDataLen, pbData, "Flags", dwFlags,  "CryptKey", *phKey);
+    return ret;
+}
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptImportKey,
+    NCRYPT_PROV_HANDLE hProvider,
+    NCRYPT_KEY_HANDLE  hImportKey,
+    LPCWSTR            pszBlobType,
+    NCryptBufferDesc   *pParameterList,
+    NCRYPT_KEY_HANDLE  *phKey,
+    PBYTE              pbData,
+    DWORD              cbData,
+    DWORD              dwFlags
+) {
+    BOOL ret = Old_NCryptImportKey(hProvider, hImportKey, pszBlobType, pParameterList, phKey, pbData, cbData, dwFlags);
+    LOQ_bool("crypto", "bhp", "KeyBlob", cbData, pbData, "Flags", dwFlags,  "CryptKey", *phKey);
+    return ret;
+}
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptDecrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+) {
+    BOOL ret = Old_NCryptDecrypt(hKey, pbInput, cbInput, pPaddingInfo, pbOutput, cbOutput, pcbResult, dwFlags);
+    LOQ_bool("crypto", "bhp", "Output", cbOutput, pbOutput, "Flags", dwFlags, "CryptKey", hKey);
+    return ret;
+}
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptEncrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+) {
+    BOOL ret = Old_NCryptEncrypt(hKey, pbInput, cbInput, pPaddingInfo, pbOutput, cbOutput, pcbResult, dwFlags);
+    LOQ_bool("crypto", "bhp", "Output", cbInput, pbInput, "Flags", dwFlags, "CryptKey", hKey);
+    return ret;
 }

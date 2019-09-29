@@ -17,7 +17,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include <stdio.h>
-
 #include "ntapi.h"
 #include "misc.h"
 #include "hooking.h"
@@ -30,18 +29,24 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "config.h"
 #include "unhook.h"
 #include "bson.h"
+#include "Shlwapi.h"
 
 struct _g_config g_config;
-wchar_t *our_process_path;
+char *our_process_path;
+char *our_dll_path;
+wchar_t *our_process_path_w;
+wchar_t *our_dll_path_w;
 wchar_t *our_commandline;
 BOOL is_64bit_os;
-
 volatile int dummy_val;
 
 extern void init_CAPE();
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 extern LONG WINAPI CAPEExceptionFilter(struct _EXCEPTION_POINTERS* ExceptionInfo);
 extern ULONG_PTR base_of_dll_of_interest;
+#ifdef CAPE_TRACE
+extern BOOL SetInitialBreakpoints(PVOID ImageBase);
+#endif
 
 void disable_tail_call_optimization(void)
 {
@@ -87,15 +92,13 @@ static hook_t g_hooks[] = {
 
 	HOOK_NOTAIL_ALT(ntdll, LdrLoadDll, 4),
 	HOOK_NOTAIL(ntdll, LdrUnloadDll, 1),
+    HOOK_SPECIAL(ntdll, NtCreateUserProcess),
     HOOK_SPECIAL(kernel32, CreateProcessInternalW),
-	//HOOK_SPECIAL(ntdll, NtCreateThread),
-	//HOOK_SPECIAL(ntdll, NtCreateThreadEx),
-	//HOOK_SPECIAL(ntdll, NtTerminateThread),
-    //HOOK_SPECIAL(kernel32, lstrcpynA),
-    //HOOK_SPECIAL(kernel32, lstrcmpiA),
 
-	// has special handling
+    //HOOK(kernel32, lstrcpynA),
+    //HOOK(kernel32, lstrcmpiA),
 
+	// special handling
 	HOOK_SPECIAL(jscript, COleScript_ParseScriptText),
 	HOOK_NOTAIL(jscript, JsEval, 5),
 	HOOK_SPECIAL(jscript9, JsParseScript),
@@ -107,7 +110,7 @@ static hook_t g_hooks[] = {
 	HOOK_SPECIAL(ole32, CoCreateInstanceEx),
 	HOOK_SPECIAL(ole32, CoGetClassObject),
 
-	HOOK_NOTAIL(ntdll, RtlDispatchException, 2),
+	HOOK_SPECIAL(ntdll, RtlDispatchException),
 	HOOK_NOTAIL(ntdll, NtRaiseException, 3),
 
 	// lowest variant of MoveFile()
@@ -115,9 +118,7 @@ static hook_t g_hooks[] = {
 	HOOK_NOTAIL_ALT(kernelbase, MoveFileWithProgressTransactedW, 6),
 	HOOK_NOTAIL_ALT(kernel32, MoveFileWithProgressTransactedW, 6),
 
-	//
     // File Hooks
-    //
 	HOOK(ntdll, NtQueryAttributesFile),
 	HOOK(ntdll, NtQueryFullAttributesFile),
 	HOOK(ntdll, NtCreateFile),
@@ -242,10 +243,7 @@ static hook_t g_hooks[] = {
 	HOOK(kernel32, RegCloseKey),
 	HOOK(kernel32, RegNotifyChangeKeyValue),
 
-    //
     // Native Registry Hooks
-    //
-
 	HOOK(ntdll, NtCreateKey),
     HOOK(ntdll, NtOpenKey),
     HOOK(ntdll, NtOpenKeyEx),
@@ -265,10 +263,7 @@ static hook_t g_hooks[] = {
     HOOK(ntdll, NtSaveKey),
     HOOK(ntdll, NtSaveKeyEx),
 
-    //
     // Window Hooks
-    //
-
 	HOOK_NOTAIL(user32, CreateWindowExA, 12),
 	HOOK_NOTAIL(user32, CreateWindowExW, 12),
 
@@ -290,13 +285,11 @@ static hook_t g_hooks[] = {
 	HOOK(user32, SetWindowLongW),
 	HOOK(user32, SetWindowLongPtrA),
 	HOOK(user32, SetWindowLongPtrW),
-	
-	//
-    // Sync Hooks
-    //
 
+    // Sync Hooks
     HOOK(ntdll, NtCreateMutant),
     HOOK(ntdll, NtOpenMutant),
+    HOOK(ntdll, NtReleaseMutant),
 	HOOK(ntdll, NtCreateEvent),
 	HOOK(ntdll, NtOpenEvent),
 	HOOK(ntdll, NtCreateNamedPipeFile),
@@ -305,11 +298,8 @@ static hook_t g_hooks[] = {
 	HOOK(ntdll, NtFindAtom),
 	HOOK(ntdll, NtDeleteAtom),
 	HOOK(ntdll, NtQueryInformationAtom),
-	
-	//
-    // Process Hooks
-    //
 
+    // Process Hooks
 	HOOK(kernel32, CreateToolhelp32Snapshot),
 	HOOK(kernel32, Process32FirstW),
 	HOOK(kernel32, Process32NextW),
@@ -317,7 +307,6 @@ static hook_t g_hooks[] = {
 	HOOK(kernel32, Module32NextW),
 	HOOK(ntdll, NtCreateProcess),
     HOOK(ntdll, NtCreateProcessEx),
-    HOOK(ntdll, NtCreateUserProcess),
     HOOK(ntdll, RtlCreateUserProcess),
     HOOK(ntdll, NtOpenProcess),
     HOOK(ntdll, NtTerminateProcess),
@@ -347,11 +336,9 @@ static hook_t g_hooks[] = {
     HOOK(kernel32, VirtualProtectEx),
     HOOK(ntdll, NtFreeVirtualMemory),
     //HOOK(kernel32, VirtualFreeEx),
-	
 	HOOK(msvcrt, system),
-    //
+
     // Thread Hooks
-    //
 	HOOK(ntdll, NtCreateThread),
 	HOOK(ntdll, NtCreateThreadEx),
 	HOOK(ntdll, NtTerminateThread),
@@ -367,19 +354,19 @@ static hook_t g_hooks[] = {
     HOOK(ntdll, RtlCreateUserThread),
     HOOK(ntdll, NtSetInformationThread),
     HOOK(ntdll, NtQueryInformationThread),
+    HOOK(ntdll, NtYieldExecution),
 
-	//
     // Misc Hooks
-    //
+
+    // for debugging only
+	//HOOK(kernel32, GetLastError),
 #ifndef _WIN64
 	HOOK(ntdll, memcpy),
 #endif
+	HOOK(kernel32, HeapCreate),
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
-    
-	// for debugging only
-	//HOOK(kernel32, GetLastError),
-
+    HOOK(user32, ChangeWindowMessageFilter),
 	HOOK(user32, SetWindowsHookExA),
     HOOK(user32, SetWindowsHookExW),
     HOOK(user32, UnhookWindowsHookEx),
@@ -430,12 +417,14 @@ static hook_t g_hooks[] = {
 	HOOK(rasapi32, RasConnectionNotificationW),
 	HOOK(kernel32, SystemTimeToTzSpecificLocalTime),
 	HOOK(ole32, CLSIDFromProgID),
+    //HOOK(ole32, OleConvertOLESTREAMToIStorage),
 	HOOK(kernel32, GlobalMemoryStatus),
 	HOOK(kernel32, GlobalMemoryStatusEx),
 	HOOK(user32, SystemParametersInfoA),
 	HOOK(user32, SystemParametersInfoW),
 	HOOK(pstorec, PStoreCreateInstance),
 	HOOK(advapi32, SaferIdentifyLevel),
+	HOOK(user32, GetKeyboardLayout),
 
 	// PE resource related functions
 	HOOK(kernel32, FindResourceExA),
@@ -459,10 +448,7 @@ static hook_t g_hooks[] = {
 	HOOK(ntdll, NtCommitTransaction),
 	HOOK(ntdll, RtlSetCurrentTransaction),
 
-	//
     // Network Hooks
-    //
-
 	HOOK(netapi32, NetUserGetInfo),
 	HOOK(netapi32, NetGetJoinInformation),
 	HOOK(netapi32, NetUserGetLocalGroups),
@@ -522,10 +508,7 @@ static hook_t g_hooks[] = {
 	HOOK(iphlpapi, GetAdaptersInfo),
 	HOOK(urlmon, CoInternetSetFeatureEnabled),
 
-    //
     // Service Hooks
-    //
-
     HOOK(advapi32, OpenSCManagerA),
     HOOK(advapi32, OpenSCManagerW),
     HOOK(advapi32, CreateServiceA),
@@ -537,9 +520,7 @@ static hook_t g_hooks[] = {
     HOOK(advapi32, ControlService),
     HOOK(advapi32, DeleteService),
 
-    //
     // Sleep Hooks
-    //
 	HOOK(ntdll, NtQueryPerformanceCounter),
     HOOK(ntdll, NtDelayExecution),
 	HOOK(ntdll, NtWaitForSingleObject),
@@ -556,10 +537,7 @@ static hook_t g_hooks[] = {
 	HOOK(user32, MsgWaitForMultipleObjectsEx),
 	HOOK(kernel32, CreateTimerQueueTimer),
 
-	//
     // Socket Hooks
-    //
-
 	HOOK(ws2_32, WSAStartup),
 	HOOK(ws2_32, gethostname),
     HOOK(ws2_32, gethostbyname),
@@ -620,12 +598,18 @@ static hook_t g_hooks[] = {
 	HOOK(advapi32, CryptCreateHash),
 	HOOK(advapi32, CryptEnumProvidersA),
 	HOOK(advapi32, CryptEnumProvidersW),
+	HOOK(advapi32, QueryUsersOnEncryptedFile),
+	HOOK(advapi32, CryptGenRandom),
+	HOOK(advapi32, CryptImportKey),
 
 	HOOK(wintrust, HTTPSCertificateTrust),
 	HOOK(wintrust, HTTPSFinalProv),
-	
+
 	HOOK(crypt32, CryptDecodeObjectEx),
 	HOOK(crypt32, CryptImportPublicKeyInfo),
+	HOOK(ncrypt, NCryptImportKey),
+	HOOK(ncrypt, NCryptDecrypt),
+	HOOK(ncrypt, NCryptEncrypt),
 
 	// needed due to the DLL being delay-loaded in some cases
 	HOOK(cryptsp, CryptAcquireContextA),
@@ -646,6 +630,11 @@ static hook_t g_hooks[] = {
 	HOOK(cryptsp, CryptCreateHash),
 	HOOK(cryptsp, CryptEnumProvidersA),
 	HOOK(cryptsp, CryptEnumProvidersW),
+	HOOK(cryptsp, CryptHashSessionKey),
+	HOOK(cryptsp, CryptGenRandom),
+	HOOK(cryptsp, CryptImportKey),
+
+	HOOK(vbe7, rtcEnvironBstr),
 };
 
 void set_hooks_dll(const wchar_t *library)
@@ -879,7 +868,7 @@ LONG WINAPI cuckoomon_exception_handler(__in struct _EXCEPTION_POINTERS *Excepti
 	operate_on_backtrace((ULONG_PTR)stack, ebp_or_rip, msg, &parse_stack_trace);
 
 #ifdef _FULL_STACK_TRACE
-	if (is_valid_address_range((ULONG_PTR)stack, 100 * sizeof(ULONG_PTR))) 
+	if (is_valid_address_range((ULONG_PTR)stack, 100 * sizeof(ULONG_PTR)))
 	{
 		DWORD i;
 		// overflows ahoy
@@ -927,16 +916,35 @@ void get_our_process_path(void)
 {
 	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
 	wchar_t *tmp2 = calloc(1, 32768 * sizeof(wchar_t));
+    our_process_path = (char*)calloc(sizeof(char), MAX_PATH);
 
 	GetModuleFileNameW(NULL, tmp, 32768);
 
 	ensure_absolute_unicode_path(tmp2, tmp);
 
-	our_process_path = tmp2;
+	our_process_path_w = tmp2;
+
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path_w, (int)wcslen(our_process_path_w)+1, our_process_path, MAX_PATH, NULL, NULL);
 
 	free(tmp);
 }
 
+void get_our_dll_path(void)
+{
+	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
+	wchar_t *tmp2 = calloc(1, 32768 * sizeof(wchar_t));
+    our_dll_path = (char*)calloc(sizeof(char), MAX_PATH);
+
+	GetModuleFileNameW((HMODULE)g_our_dll_base, tmp, 32768);
+
+	ensure_absolute_unicode_path(tmp2, tmp);
+
+	our_dll_path_w = tmp2;
+
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_dll_path_w, (int)wcslen(our_dll_path_w)+1, our_dll_path, MAX_PATH, NULL, NULL);
+
+	free(tmp);
+}
 void get_our_commandline(void)
 {
 	wchar_t *tmp = calloc(1, 32768 * sizeof(wchar_t));
@@ -987,6 +995,15 @@ void init_private_heap(void)
 #endif
 }
 
+BOOL inside_hook(LPVOID Address)
+{
+	for (unsigned int i = 0; i < ARRAYSIZE(g_hooks); i++) {
+        if ((ULONG_PTR)Address >= (ULONG_PTR)g_hooks[i].hookdata && (ULONG_PTR)Address < (ULONG_PTR)(g_hooks[i].hookdata + sizeof(hook_data_t)))
+            return TRUE;
+    }
+
+    return FALSE;
+}
 BOOLEAN g_dll_main_complete;
 
 extern void ignored_threads_init(void);
@@ -1000,7 +1017,7 @@ OSVERSIONINFOA g_osverinfo;
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 {
-	char config_fname[MAX_PATH];
+	char config_fname[MAX_PATH], analyzer_path[MAX_PATH];
 	lasterror_t lasterror;
 
 	get_lasterrors(&lasterror);
@@ -1029,7 +1046,7 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 
 		g_our_dll_base = (ULONG_PTR)hModule;
 		g_our_dll_size = get_image_size(g_our_dll_base);
-		
+
 		g_osverinfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
 		GetVersionEx(&g_osverinfo);
 
@@ -1046,6 +1063,8 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 		file_init();
 		//ignored_threads_init();
 
+		get_our_dll_path();
+
 		get_our_process_path();
 
 		get_our_commandline();
@@ -1057,13 +1076,15 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 		if (!read_config())
 #if CUCKOODBG
 			;
+		else
+			DoOutputDebugString("Config loaded.\n");
 #else
 			// if we're not debugging, then failure to read the cuckoomon config should be a critical error
 			goto abort;
 #endif
 
 		// don't inject into our own binaries run out of the analyzer directory unless they're the first process (intended)
-		if (wcslen(g_config.w_analyzer) && !wcsnicmp(our_process_path, g_config.w_analyzer, wcslen(g_config.w_analyzer)) && !g_config.first_process)
+		if (wcslen(g_config.w_analyzer) && !wcsnicmp(our_process_path_w, g_config.w_analyzer, wcslen(g_config.w_analyzer)) && !g_config.first_process)
 			goto abort;
 
 		if (g_config.debug) {
@@ -1141,10 +1162,20 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 	g_dll_main_complete = TRUE;
 	set_lasterrors(&lasterror);
 	return TRUE;
-    
+
 abort:
+    // delete config file
+    strncpy(analyzer_path, our_dll_path, strlen(our_dll_path));
+    PathRemoveFileSpec(analyzer_path); // remove filename
+    PathRemoveFileSpec(analyzer_path); // remove dll folder
+    sprintf(config_fname, "%s\\%u.ini", analyzer_path, GetCurrentProcessId());
+	DeleteFileA(config_fname);
+
+    // backward compatibility
+    memset(config_fname, 0, sizeof(config_fname));
 	sprintf(config_fname, "C:\\%u.ini", GetCurrentProcessId());
 	DeleteFileA(config_fname);
+
 	set_lasterrors(&lasterror);
 	return FALSE;
 }

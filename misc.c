@@ -38,7 +38,8 @@ static _NtQueryObject pNtQueryObject;
 static _NtQueryKey pNtQueryKey;
 static _NtDelayExecution pNtDelayExecution;
 static _NtQuerySystemInformation pNtQuerySystemInformation;
-static _NtUnmapViewOfSection pNtUnmapViewOfSection;
+_NtMapViewOfSection pNtMapViewOfSection;
+_NtUnmapViewOfSection pNtUnmapViewOfSection;
 _NtAllocateVirtualMemory pNtAllocateVirtualMemory;
 _NtProtectVirtualMemory pNtProtectVirtualMemory;
 _NtFreeVirtualMemory pNtFreeVirtualMemory;
@@ -60,6 +61,7 @@ void resolve_runtime_apis(void)
 	*(FARPROC *)&pNtFreeVirtualMemory = GetProcAddress(ntdllbase, "NtFreeVirtualMemory");
 	*(FARPROC *)&pLdrRegisterDllNotification = GetProcAddress(ntdllbase, "LdrRegisterDllNotification");
 	*(FARPROC *)&pRtlGenRandom = GetProcAddress(GetModuleHandle("advapi32"), "SystemFunction036");
+	*(FARPROC *)&pNtMapViewOfSection = GetProcAddress(ntdllbase, "NtMapViewOfSection");
 	*(FARPROC *)&pNtUnmapViewOfSection = GetProcAddress(ntdllbase, "NtUnmapViewOfSection");
 }
 
@@ -683,10 +685,10 @@ char *convert_address_to_dll_name_and_offset(ULONG_PTR addr, unsigned int *offse
 
 	if (addr >= g_our_dll_base && addr < (g_our_dll_base + g_our_dll_size))
 	{
-		char *buf = calloc(1, strlen("cuckoomon.dll") + 1);
+		char *buf = calloc(1, strlen("capemon.dll") + 1);
 		if (buf == NULL)
 			return NULL;
-		strcpy(buf, "cuckoomon.dll");
+		strcpy(buf, "capemon.dll");
 		*offset = (unsigned int)(addr - g_our_dll_base);
 		return buf;
 	}

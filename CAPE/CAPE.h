@@ -22,6 +22,9 @@ extern CHAR s_szDllPath[MAX_PATH];
 //Global debugger switch
 #define DEBUGGER_ENABLED 0
 
+void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
+void DoOutputErrorString(_In_ LPCTSTR lpOutputString, ...);
+
 PVOID GetHookCallerBase();
 PVOID GetPageAddress(PVOID Address);
 PVOID GetAllocationBase(PVOID Address);
@@ -31,7 +34,7 @@ BOOL DumpRegion(PVOID Address);
 int DumpMemory(LPVOID Buffer, SIZE_T Size);
 int DumpCurrentProcessNewEP(LPVOID NewEP);
 int DumpCurrentProcess();
-int DumpProcess(HANDLE hProcess, LPVOID ImageBase);
+int DumpProcess(HANDLE hProcess, LPVOID ImageBase, LPVOID NewEP);
 int DumpPE(LPVOID Buffer);
 int ScanForNonZero(LPVOID Buffer, SIZE_T Size);
 int ScanPageForNonZero(LPVOID Address);
@@ -39,48 +42,11 @@ int ScanForPE(LPVOID Buffer, SIZE_T Size, LPVOID* Offset);
 int ScanForDisguisedPE(LPVOID Buffer, SIZE_T Size, LPVOID* Offset);
 int IsDisguisedPEHeader(LPVOID Buffer);
 int DumpImageInCurrentProcess(LPVOID ImageBase);
-void DumpSectionViewsForPid(DWORD Pid);
+
+BOOL ProcessDumped, FilesDumped, ModuleDumped;
 
 SYSTEM_INFO SystemInfo;
 PVOID CallingModule;
-
-typedef struct InjectionSectionView
-{
-    HANDLE                          SectionHandle;
-    PVOID                           LocalView;
-    SIZE_T                          ViewSize;
-	int                             TargetProcessId;
-    struct InjectionSectionView     *NextSectionView;
-} INJECTIONSECTIONVIEW, *PINJECTIONSECTIONVIEW;
-
-PINJECTIONSECTIONVIEW AddSectionView(HANDLE SectionHandle, PVOID LocalView, SIZE_T ViewSize);
-PINJECTIONSECTIONVIEW GetSectionView(HANDLE SectionHandle);
-BOOL DropSectionView(PINJECTIONSECTIONVIEW SectionView);
-void DumpSectionViewsForPid(DWORD Pid);
-void DumpSectionView(PINJECTIONSECTIONVIEW SectionView);
-
-typedef struct InjectionInfo
-{
-    int                         ProcessId;
-	HANDLE	                    ProcessHandle;
-    DWORD_PTR                   ImageBase;
-    DWORD_PTR                   EntryPoint;
-    BOOL                        WriteDetected;
-    BOOL                        ImageDumped;
-    LPVOID                      BufferBase;
-    LPVOID                      StackPointer;
-    unsigned int                BufferSizeOfImage;
-    HANDLE                      SectionHandle;
-//    struct InjectionSectionView *SectionViewList;
-    struct InjectionInfo        *NextInjectionInfo;
-} INJECTIONINFO, *PINJECTIONINFO;
-
-struct InjectionInfo *InjectionInfoList;
-
-PINJECTIONINFO GetInjectionInfo(DWORD ProcessId);
-PINJECTIONINFO CreateInjectionInfo(DWORD ProcessId);
-
-struct InjectionSectionView *SectionViewList;
 
 //
 // MessageId: STATUS_SUCCESS
@@ -112,7 +78,7 @@ struct InjectionSectionView *SectionViewList;
 
 #define PLUGX_SIGNATURE		0x5658	// 'XV'
 
-typedef struct CapeMetadata 
+typedef struct CapeMetadata
 {
 	char*	ProcessPath;
 	char*	ModulePath;
@@ -130,29 +96,32 @@ BOOL SetCapeMetaData(DWORD DumpType, DWORD TargetPid, HANDLE hTargetProcess, PVO
 
 enum {
     PROCDUMP                = 0,
-    
+
     COMPRESSION             = 1,
-    
+
     INJECTION_PE            = 3,
     INJECTION_SHELLCODE     = 4,
     //INJECTION_RUNPE         = 5,
 
     EXTRACTION_PE           = 8,
     EXTRACTION_SHELLCODE    = 9,
-    
+
     PLUGX_PAYLOAD           = 0x10,
     PLUGX_CONFIG            = 0x11,
-    
+
     EVILGRAB_PAYLOAD        = 0x14,
     EVILGRAB_DATA           = 0x15,
-    
+
     SEDRECO_DATA            = 0x20,
-    
+
     URSNIF_CONFIG           = 0x24,
     URSNIF_PAYLOAD          = 0x25,
-	
+
     CERBER_CONFIG           = 0x30,
     CERBER_PAYLOAD          = 0x31,
+
+    QAKBOT_CONFIG           = 0x38,
+    QAKBOT_PAYLOAD          = 0x39,
 
     DATADUMP                = 0x66
 };

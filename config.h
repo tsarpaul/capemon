@@ -109,9 +109,16 @@ struct _g_config {
 
     // should we dump each process on exit/analysis timeout?
     int procdump;
+    int procmemdump;
 
     // should we attempt import reconstruction on each process dump? (slow)
     int import_reconstruction;
+
+    // should we terminate processes after dumping on terminate_event?
+    int terminate_processes;
+
+    // dump all calling regions immediately
+    int verbose_dumping;
 };
 
 extern struct _g_config g_config;

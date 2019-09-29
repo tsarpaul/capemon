@@ -50,7 +50,17 @@ typedef NTSTATUS(WINAPI *_NtDelayExecution)(
 typedef NTSTATUS(WINAPI *_NtUnmapViewOfSection)(
 	HANDLE ProcessHandle,
 	PVOID BaseAddress);
-
+typedef NTSTATUS(WINAPI *_NtMapViewOfSection)(
+	_In_     HANDLE SectionHandle,
+	_In_     HANDLE ProcessHandle,
+	__inout  PVOID *BaseAddress,
+	_In_     ULONG_PTR ZeroBits,
+	_In_     SIZE_T CommitSize,
+	__inout  PLARGE_INTEGER SectionOffset,
+	__inout  PSIZE_T ViewSize,
+	__in     UINT InheritDisposition,
+	__in     ULONG AllocationType,
+	__in     ULONG Win32Protect);
 typedef struct _LDR_DLL_LOADED_NOTIFICATION_DATA {
 	ULONG Flags;
 	const PUNICODE_STRING FullDllName;
@@ -162,7 +172,8 @@ void set_dll_of_interest(ULONG_PTR BaseAddress);
 PWCHAR get_dll_basename(PUNICODE_STRING library);
 void register_dll_notification_manually(PLDR_DLL_NOTIFICATION_FUNCTION notify);
 
-extern wchar_t *our_process_path;
+extern char *our_process_path;
+extern wchar_t *our_process_path_w;
 
 BOOLEAN is_valid_address_range(ULONG_PTR start, DWORD len);
 
@@ -205,3 +216,9 @@ LONG WINAPI cuckoomon_exception_handler(__in struct _EXCEPTION_POINTERS *Excepti
 
 void prevent_module_reloading(PVOID *BaseAddress);
 PVOID test_module_reloading(PVOID *BaseAddress);
+
+struct envstruct {
+	ULONG k;
+	ULONG nullval;
+	LPWSTR envstr;
+};
