@@ -15,6 +15,8 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.If not, see <http://www.gnu.org/licenses/>.
 */
+//#define DEBUG_COMMENTS
+
 #define _CRT_RAND_S
 #define MD5LEN  			16
 
@@ -112,7 +114,7 @@ extern int operate_on_backtrace(ULONG_PTR _esp, ULONG_PTR _ebp, void *extra, int
 extern unsigned int address_is_in_stack(PVOID Address);
 extern hook_info_t *hook_info();
 extern ULONG_PTR base_of_dll_of_interest;
-extern wchar_t *our_process_path;
+extern wchar_t *our_process_path_w;
 extern wchar_t *our_commandline;
 extern ULONG_PTR g_our_dll_base;
 extern DWORD g_our_dll_size;
@@ -1348,6 +1350,19 @@ BOOL DumpRegion(PVOID Address)
 }
 
 //**************************************************************************************
+int DumpImageInCurrentProcessFixImports(LPVOID ImageBase, LPVOID NewEP)
+//**************************************************************************************
+{
+    if (DumpCount < DUMP_MAX && ScyllaDumpImageInCurrentProcessFixImports((DWORD_PTR)ImageBase, (DWORD_PTR)NewEP))
+    {
+        DumpCount++;
+        return 1;
+    }
+
+    return 0;
+}
+
+//**************************************************************************************
 int DumpCurrentProcessFixImports(LPVOID NewEP)
 //**************************************************************************************
 {
@@ -1592,12 +1607,12 @@ void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
         if (g_config.import_reconstruction)
             ProcessDumped = ScyllaDumpProcessFixImports(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
         else
-            ProcessDumped = ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)ImageBase, 0);
+            ProcessDumped = DumpImageInCurrentProcess(ImageBase);
     }
     // Disable dumping of all calling regions for the moment as this needs further testing.
     // (This causes lots of useless dumps from Word processes, for example.)
     //else if (lookup_get(&g_caller_regions, (ULONG_PTR)MemInfo.BaseAddress, NULL) || MemInfo.BaseAddress == CallerBase)
-    else if (MemInfo.BaseAddress == CallerBase)
+    else if (!g_config.verbose_dumping && MemInfo.BaseAddress == CallerBase)
     {
         DoOutputDebugString("DumpInterestingRegions: Dumping calling region at 0x%p.\n", MemInfo.BaseAddress);
 
@@ -1606,7 +1621,7 @@ void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
         CapeMetaData->Address = MemInfo.BaseAddress;
 
         if (IsDisguisedPEHeader(MemInfo.BaseAddress))
-            ScyllaDumpProcess(GetCurrentProcess(), (DWORD_PTR)MemInfo.BaseAddress, 0);
+            DumpImageInCurrentProcess(MemInfo.BaseAddress);
         else
             DumpRegion(MemInfo.BaseAddress);
     }
@@ -1626,7 +1641,12 @@ int DoProcessDump(PVOID CallerBase)
     EnterCriticalSection(&ProcessDumpCriticalSection);
 
     if (base_of_dll_of_interest)
+    {
         ImageBase = (PVOID)base_of_dll_of_interest;
+        // Prevent dump of rundll32
+        if (CallerBase == GetModuleHandle(NULL))
+            CallerBase = NULL;
+    }
     else
         ImageBase = GetModuleHandle(NULL);
 
@@ -1730,15 +1750,19 @@ int DoProcessDump(PVOID CallerBase)
                 WriteFile(FileHandle, &MemInfo.Protect, sizeof(MemInfo.Protect), &BytesWritten, NULL);
                 WriteFile(FileHandle, TempBuffer, (DWORD)MemInfo.RegionSize, &BytesWritten, NULL);
                 free(TempBuffer);
+#ifdef DEBUG_COMMENTS
                 if (BytesWritten != MemInfo.RegionSize)
                     DoOutputDebugString("DoProcessDump: Anomaly detected, wrote only 0x%x of 0x%x bytes to memory dump from region 0x%p.\n", BytesWritten, MemInfo.RegionSize, MemInfo.BaseAddress);
                 else
                     DoOutputDebugString("DoProcessDump: Added 0x%x byte region at 0x%p to memory dump (protect 0x%x).\n", MemInfo.RegionSize, MemInfo.BaseAddress, MemInfo.Protect);
+#endif
             }
             __except(EXCEPTION_EXECUTE_HANDLER)
             {
                 free(TempBuffer);
+#ifdef DEBUG_COMMENTS
                 DoOutputDebugString("DoProcessDump: Exception attempting to dump region at 0x%p, size 0x%x.\n", MemInfo.BaseAddress, MemInfo.RegionSize);
+#endif
             }
         }
 
@@ -1831,7 +1855,7 @@ void init_CAPE()
     CapeMetaData = (PCAPEMETADATA)malloc(sizeof(CAPEMETADATA));
     CapeMetaData->Pid = GetCurrentProcessId();
     CapeMetaData->ProcessPath = (char*)malloc(MAX_PATH);
-    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path, (int)wcslen(our_process_path)+1, CapeMetaData->ProcessPath, MAX_PATH, NULL, NULL);
+    WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path_w, (int)wcslen(our_process_path_w)+1, CapeMetaData->ProcessPath, MAX_PATH, NULL, NULL);
 
     CommandLine = (char*)malloc(MAX_PATH);
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_commandline, (int)wcslen(our_commandline)+1, CommandLine, MAX_PATH, NULL, NULL);

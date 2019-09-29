@@ -31,11 +31,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define STATUS_BAD_COMPRESSION_BUFFER    ((NTSTATUS)0xC0000242L)
 
-#ifdef CAPE_INJECTION
-extern void DuplicationHandler(HANDLE SourceProcessHandle, HANDLE TargetHandle);
-extern void DumpSectionViewsForHandle(HANDLE SectionHandle);
-#endif
-
 extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
 
 HOOKDEF(HHOOK, WINAPI, SetWindowsHookExA,
@@ -67,7 +62,7 @@ HOOKDEF(HHOOK, WINAPI, SetWindowsHookExW,
 ) {
 
 	HHOOK ret;
-
+	
 	if (hMod && lpfn && dwThreadId) {
 		DWORD pid = get_pid_by_tid(dwThreadId);
 		if (pid && pid != GetCurrentProcessId())
@@ -177,7 +172,7 @@ HOOKDEF(NTSTATUS, WINAPI, LdrGetProcedureAddress,
 	if (FunctionName != NULL && FunctionName->Length == 13 && FunctionName->Buffer != NULL &&
 		(!strncmp(FunctionName->Buffer, "EncodePointer", 13) || !strncmp(FunctionName->Buffer, "DecodePointer", 13)))
 		return ret;
-
+    
     LOQ_ntstatus("system", "opSiP", "ModuleName", get_basename_of_module(ModuleHandle), "ModuleHandle", ModuleHandle,
         "FunctionName", FunctionName != NULL ? FunctionName->Length : 0,
             FunctionName != NULL ? FunctionName->Buffer : NULL,
@@ -204,7 +199,7 @@ HOOKDEF(BOOL, WINAPI, DeviceIoControl,
 ) {
 	BOOL ret;
 	ENSURE_DWORD(lpBytesReturned);
-
+	
 	ret = Old_DeviceIoControl(hDevice, dwIoControlCode, lpInBuffer,
 		nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned,
 		lpOverlapped);
@@ -362,9 +357,6 @@ HOOKDEF(NTSTATUS, WINAPI, NtClose,
 		LOQ_ntstatus("system", "ps", "Handle", Handle, "Alert", "Tried to close Cuckoo's log handle");
 		return ret;
 	}
-#ifdef CAPE_INJECTION
-        DumpSectionViewsForHandle(Handle);
-#endif
 	ret = Old_NtClose(Handle);
     LOQ_ntstatus("system", "p", "Handle", Handle);
     if(NT_SUCCESS(ret)) {
@@ -399,9 +391,6 @@ HOOKDEF(NTSTATUS, WINAPI, NtDuplicateObject,
 			remove_file_from_log_tracking(SourceHandle);
 			file_close(SourceHandle);
 		}
-#ifdef CAPE_INJECTION
-        DuplicationHandler(SourceHandle, TargetProcessHandle);
-#endif
 	}
 	return ret;
 }
@@ -853,7 +842,7 @@ HOOKDEF(HDEVINFO, WINAPI, SetupDiGetClassDevsW,
 			LOQ_handle("misc", "ss", "ClassGuid", idbuf, "Known", known);
 		else
 			LOQ_handle("misc", "s", "ClassGuid", idbuf);
-
+            
         set_lasterrors(&lasterror);
 	}
 	return ret;
@@ -1108,15 +1097,15 @@ HOOKDEF(void, WINAPIV, memcpy,
    void *dest,
    const void *src,
    size_t count
-)
+) 
 {
 	int ret = 0;	// needed for LOQ_void
 
 	Old_memcpy(dest, src, count);
-
+	
     if (count > 0xa00)
         LOQ_void("misc", "bppi", "DestinationBuffer", count, dest, "source", src, "destination", dest, "count", count);
-
+	
 	return;
 }
 
@@ -1434,6 +1423,19 @@ HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
 	LOQ_bool("misc", "b", "OLE2", len, buf);
 	return ret;
 }
+
+HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+)
+{
+    HANDLE ret;
+    ret = Old_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
+    LOQ_nonnull("misc", "ihh", "Options", flOptions, "InitialSize", dwInitialSize, "MaximumSize", dwMaximumSize);
+    return ret;
+}
+
 HOOKDEF(BOOL, WINAPI, FlsAlloc,
 	_In_ PFLS_CALLBACK_FUNCTION lpCallback
 ) {
@@ -1514,4 +1516,13 @@ HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
         // replace first char so it differs from computername
         *ret = '#';
 	return ret;
+}
+
+HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  DWORD idThread
+)
+{
+    HKL ret = Old_GetKeyboardLayout(idThread);
+    LOQ_nonnull("misc", "p", "KeyboardLayout", (DWORD)ret & 0xFFFF);
+    return ret;
 }

@@ -963,7 +963,7 @@ void WriteMemoryHandler(HANDLE ProcessHandle, LPVOID BaseAddress, LPCVOID Buffer
         {
             SetCapeMetaData(INJECTION_PE, Pid, ProcessHandle, NULL);
 
-            CurrentInjectionInfo->ImageDumped = DumpImageInCurrentProcess((PVOID)Buffer);
+            CurrentInjectionInfo->ImageDumped = DumpImageInCurrentProcessFixImports((PVOID)Buffer, NULL);
 
             if (CurrentInjectionInfo->ImageDumped)
             {
