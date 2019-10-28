@@ -116,6 +116,15 @@ struct _g_config {
 
     // should we terminate processes after dumping on terminate_event?
     int terminate_processes;
+
+    // dump all calling regions immediately
+    int verbose_dumping;
+
+    // dump regions containing c2
+    int dump_config_region;
+
+    // prevent monitoring child processes
+    int single_process;
 };
 
 extern struct _g_config g_config;

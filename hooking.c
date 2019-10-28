@@ -26,9 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "misc.h"
 #include "pipe.h"
 #include "CAPE\CAPE.h"
-#ifdef CAPE_EXTRACTION
-#include "CAPE\Extraction.h"
-#endif
+#include "CAPE\Debugger.h"
 
 #ifdef _WIN64
 #define TLS_LAST_WIN32_ERROR 0x68
@@ -41,9 +39,6 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 static lookup_t g_hook_info;
 lookup_t g_caller_regions;
 
-extern unsigned int address_is_in_stack(PVOID Address);
-extern void DoOutputDebugString(_In_ LPCTSTR lpOutputString, ...);
-extern BOOL ModuleDumped;
 #ifdef CAPE_TRACE
 extern BOOL SetInitialBreakpoints(PVOID ImageBase);
 extern BOOL BreakpointsSet;
@@ -51,7 +46,7 @@ extern BOOL BreakpointsSet;
 
 void hook_init()
 {
-    lookup_init(&g_hook_info);
+    lookup_init_no_cs(&g_hook_info);
     lookup_init(&g_caller_regions);
 }
 
@@ -68,25 +63,26 @@ static int set_caller_info(void *unused, ULONG_PTR addr)
 	hook_info_t *hookinfo = hook_info();
 
 	if (!is_in_dll_range(addr)) {
-		if (hookinfo->main_caller_retaddr == 0) {
-            PVOID AllocationBase;
-			hookinfo->main_caller_retaddr = addr;
-            AllocationBase = GetAllocationBase((PVOID)addr);
-            if (AllocationBase && !lookup_get(&g_caller_regions, (ULONG_PTR)AllocationBase, 0)) {
-                if (address_is_in_stack((PVOID)addr)) {
-                    DoOutputDebugString("set_caller_info: Calling address 0x%p in stack (%ws::%s)", addr, hookinfo->current_hook->library, hookinfo->current_hook->funcname);
-                }            
-                lookup_add(&g_caller_regions, (ULONG_PTR)AllocationBase, 0);
-                DoOutputDebugString("set_caller_info: Adding region at 0x%p to caller regions list.\n", AllocationBase);
-#ifdef CAPE_EXTRACTION
-                PTRACKEDREGION TrackedRegion = GetTrackedRegion(addr);
-                if (TrackedRegion) {
-                    TrackedRegion->CanDump = 1;
-                    ProcessTrackedRegion(TrackedRegion);
-                }
-#endif
+        PVOID AllocationBase = GetAllocationBase((PVOID)addr);
+        if (AllocationBase && !lookup_get(&g_caller_regions, (ULONG_PTR)AllocationBase, 0)) {
+            DoOutputDebugString("set_caller_info: Adding region at 0x%p to caller regions list (%ws::%s).\n", AllocationBase, hookinfo->current_hook->library, hookinfo->current_hook->funcname);
+            lookup_add(&g_caller_regions, (ULONG_PTR)AllocationBase, 0);
+            if (g_config.verbose_dumping)
+            {
+                DoOutputDebugString("VerboseDump: Dumping calling region at 0x%p.\n", AllocationBase);
+
+                CapeMetaData->ModulePath = NULL;
+                CapeMetaData->DumpType = DATADUMP;
+                CapeMetaData->Address = AllocationBase;
+
+                if (IsDisguisedPEHeader(AllocationBase))
+                    DumpImageInCurrentProcess(AllocationBase);
+                else
+                    DumpRegion(AllocationBase);
             }
         }
+		if (hookinfo->main_caller_retaddr == 0)
+			hookinfo->main_caller_retaddr = addr;
 		else {
 			hookinfo->parent_caller_retaddr = addr;
 			return 1;
@@ -242,14 +238,9 @@ int WINAPI enter_hook(hook_t *h, ULONG_PTR sp, ULONG_PTR ebp_or_rip)
 
 		operate_on_backtrace(sp, ebp_or_rip, NULL, set_caller_info);
 
-#ifdef CAPE_EXTRACTION
-        ExtractionCallback(hookinfo);
-#endif
-#ifdef CAPE_DUMP_ON_API
 		dump_on_api(h);
-#endif
 #ifdef CAPE_TRACE
-		base_on_api(h);
+        base_on_api(h);
 #endif
 
 		return 1;

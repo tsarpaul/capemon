@@ -44,7 +44,7 @@ HOOKDEF(HHOOK, WINAPI, SetWindowsHookExA,
 
 	if (hMod && lpfn && dwThreadId) {
 		DWORD pid = get_pid_by_tid(dwThreadId);
-		if (pid && pid != GetCurrentProcessId())
+		if (!g_config.single_process && pid && pid != GetCurrentProcessId())
 			pipe("PROCESS:%d:%d,%d", is_suspended(pid, dwThreadId), pid, dwThreadId);
 	}
 
@@ -65,7 +65,7 @@ HOOKDEF(HHOOK, WINAPI, SetWindowsHookExW,
 	
 	if (hMod && lpfn && dwThreadId) {
 		DWORD pid = get_pid_by_tid(dwThreadId);
-		if (pid && pid != GetCurrentProcessId())
+		if (!g_config.single_process && pid && pid != GetCurrentProcessId())
 			pipe("PROCESS:%d:%d,%d", is_suspended(pid, dwThreadId), pid, dwThreadId);
 	}
 
@@ -105,29 +105,29 @@ HOOKDEF(PVOID, WINAPI, RtlAddVectoredExceptionHandler,
 ) {
 	PVOID ret = 0;
 
-    //if (DEBUGGER_ENABLED && VECTORED_HANDLER && First)
-    //{
-    //    if (!CAPEExceptionFilterHandle)
-    //    {
-    //        DoOutputDebugString("RtlAddVectoredExceptionHandler hook: Error - CAPE vectored handler not registered.\n");
-    //        ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
-    //        LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
-    //        return ret;
-    //    }
-    //
-    //    // We register the handler at the bottom, this minimizes
-    //    // our interference and means the handle is valid
-    //    ret = Old_RtlAddVectoredExceptionHandler(0, Handler);
-    //
-    //    if (ret == NULL)
-    //        return ret;
-    //
-    //    // We record the handler address so that
-    //    // CAPEExceptionFilter can call it directly
-    //    DoOutputDebugString("RtlAddVectoredExceptionHandler hook: CAPE vectored handler protected as First.\n");
-    //    SampleVectoredHandler = (SAMPLE_HANDLER)Handler;
-    //}
-    //else
+    if (DEBUGGER_ENABLED && VECTORED_HANDLER && First)
+    {
+        if (!CAPEExceptionFilterHandle)
+        {
+            DoOutputDebugString("RtlAddVectoredExceptionHandler hook: Error - CAPE vectored handler not registered.\n");
+            ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
+            LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
+            return ret;
+        }
+
+        // We register the handler at the bottom, this minimizes
+        // our interference and means the handle is valid
+        ret = Old_RtlAddVectoredExceptionHandler(0, Handler);
+
+        if (ret == NULL)
+            return ret;
+
+        // We record the handler address so that
+        // CAPEExceptionFilter can call it directly
+        DoOutputDebugString("RtlAddVectoredExceptionHandler hook: CAPE vectored handler protected as First.\n");
+        SampleVectoredHandler = (SAMPLE_HANDLER)Handler;
+    }
+    else
         ret = Old_RtlAddVectoredExceptionHandler(First, Handler);
 
     LOQ_nonnull("hooking", "ip", "First", First, "Handler", Handler);
@@ -1423,6 +1423,19 @@ HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
 	LOQ_bool("misc", "b", "OLE2", len, buf);
 	return ret;
 }
+
+HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+)
+{
+    HANDLE ret;
+    ret = Old_HeapCreate(flOptions, dwInitialSize, dwMaximumSize);
+    LOQ_nonnull("misc", "ihh", "Options", flOptions, "InitialSize", dwInitialSize, "MaximumSize", dwMaximumSize);
+    return ret;
+}
+
 HOOKDEF(BOOL, WINAPI, FlsAlloc,
 	_In_ PFLS_CALLBACK_FUNCTION lpCallback
 ) {
@@ -1503,4 +1516,25 @@ HOOKDEF(LPWSTR, WINAPI, rtcEnvironBstr,
         // replace first char so it differs from computername
         *ret = '#';
 	return ret;
+}
+
+HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  DWORD idThread
+)
+{
+    HKL ret = Old_GetKeyboardLayout(idThread);
+    LOQ_nonnull("misc", "p", "KeyboardLayout", (DWORD)ret & 0xFFFF);
+    return ret;
+}
+
+HOOKDEF(VOID, WINAPI, RtlMoveMemory,
+    _Out_       VOID UNALIGNED *Destination,
+    _In_  const VOID UNALIGNED *Source,
+    _In_        SIZE_T         Length
+)
+{
+    int ret = 0;
+    RtlMoveMemory(Destination, Source, Length);
+    LOQ_void("misc", "bppi", "Destination", Length, Destination, "Source", Source, "destination", Destination, "Length", Length);
+    return ;
 }

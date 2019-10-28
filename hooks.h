@@ -880,6 +880,11 @@ extern HOOKDEF(NTSTATUS, WINAPI, NtOpenMutant,
     __in        POBJECT_ATTRIBUTES ObjectAttributes
 );
 
+extern HOOKDEF(NTSTATUS, WINAPI, NtReleaseMutant,
+    __in        HANDLE MutantHandle,
+    __out_opt   PLONG PreviousCount
+);
+
 extern HOOKDEF(NTSTATUS, WINAPI, NtCreateEvent,
 	__out		PHANDLE EventHandle,
 	__in		ACCESS_MASK DesiredAccess,
@@ -2809,6 +2814,39 @@ extern HOOKDEF(BOOL, WINAPI, CryptGenRandom,
     BYTE       *pbBuffer
 );
 
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptImportKey,
+    NCRYPT_PROV_HANDLE hProvider,
+    NCRYPT_KEY_HANDLE  hImportKey,
+    LPCWSTR            pszBlobType,
+    NCryptBufferDesc   *pParameterList,
+    NCRYPT_KEY_HANDLE  *phKey,
+    PBYTE              pbData,
+    DWORD              cbData,
+    DWORD              dwFlags
+);
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptDecrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+);
+
+HOOKDEF(SECURITY_STATUS, WINAPI, NCryptEncrypt,
+    NCRYPT_KEY_HANDLE hKey,
+    PBYTE             pbInput,
+    DWORD             cbInput,
+    VOID              *pPaddingInfo,
+    PBYTE             pbOutput,
+    DWORD             cbOutput,
+    DWORD             *pcbResult,
+    DWORD             dwFlags
+);
+
 //
 // Special Hooks
 //
@@ -3030,6 +3068,12 @@ extern HOOKDEF(NTSTATUS, WINAPI, NtYieldExecution,
     VOID
 );
 
+extern HOOKDEF(VOID, WINAPI, RtlMoveMemory,
+    _Out_       VOID UNALIGNED *Destination,
+    _In_  const VOID UNALIGNED *Source,
+    _In_        SIZE_T         Length
+);
+
 extern HOOKDEF(HRESULT, WINAPI, OleConvertOLESTREAMToIStorage,
     IN LPOLESTREAM          lpolestream,
     OUT LPSTORAGE           pstg,
@@ -3052,4 +3096,14 @@ extern HOOKDEF(BOOL, WINAPI, CryptImportKey,
     HCRYPTKEY  hPubKey,
     DWORD      dwFlags,
     HCRYPTKEY  *phKey
+);
+
+extern HOOKDEF(HANDLE, WINAPI, HeapCreate,
+  _In_ DWORD  flOptions,
+  _In_ SIZE_T dwInitialSize,
+  _In_ SIZE_T dwMaximumSize
+);
+
+extern HOOKDEF(HKL, WINAPI, GetKeyboardLayout,
+  _In_ DWORD idThread
 );

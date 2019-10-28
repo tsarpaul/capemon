@@ -357,6 +357,21 @@ int read_config(void)
                 else
                     DoOutputDebugString("Terminate processes on terminate_event disabled.\n");
 			}
+            else if (!strcmp(key, "verbose-dumping")) {
+				g_config.verbose_dumping = value[0] == '1';
+                if (g_config.verbose_dumping)
+                    DoOutputDebugString("Verbose dumping enabled.\n");
+			}
+            else if (!strcmp(key, "dump-config-region")) {
+				g_config.dump_config_region = value[0] == '1';
+                if (g_config.dump_config_region)
+                    DoOutputDebugString("Dump config region enabled.\n");
+			}
+            else if (!strcmp(key, "single-process")) {
+				g_config.single_process = value[0] == '1';
+                if (g_config.single_process)
+                    DoOutputDebugString("Monitoring child processes disabled.\n");
+			}
             else DoOutputDebugString("CAPE debug - unrecognised key %s.\n", key);
 		}
     }

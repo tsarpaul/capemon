@@ -38,7 +38,8 @@ static _NtQueryObject pNtQueryObject;
 static _NtQueryKey pNtQueryKey;
 static _NtDelayExecution pNtDelayExecution;
 static _NtQuerySystemInformation pNtQuerySystemInformation;
-static _NtUnmapViewOfSection pNtUnmapViewOfSection;
+_NtMapViewOfSection pNtMapViewOfSection;
+_NtUnmapViewOfSection pNtUnmapViewOfSection;
 _NtAllocateVirtualMemory pNtAllocateVirtualMemory;
 _NtProtectVirtualMemory pNtProtectVirtualMemory;
 _NtFreeVirtualMemory pNtFreeVirtualMemory;
@@ -60,6 +61,7 @@ void resolve_runtime_apis(void)
 	*(FARPROC *)&pNtFreeVirtualMemory = GetProcAddress(ntdllbase, "NtFreeVirtualMemory");
 	*(FARPROC *)&pLdrRegisterDllNotification = GetProcAddress(ntdllbase, "LdrRegisterDllNotification");
 	*(FARPROC *)&pRtlGenRandom = GetProcAddress(GetModuleHandle("advapi32"), "SystemFunction036");
+	*(FARPROC *)&pNtMapViewOfSection = GetProcAddress(ntdllbase, "NtMapViewOfSection");
 	*(FARPROC *)&pNtUnmapViewOfSection = GetProcAddress(ntdllbase, "NtUnmapViewOfSection");
 }
 
@@ -1833,19 +1835,14 @@ void register_dll_notification_manually(PLDR_DLL_NOTIFICATION_FUNCTION notify)
 
 unsigned int address_is_in_stack(PVOID Address)
 {
-    if (!Address)
-        return 0;
-
     __try {
         PNT_TIB pTib = (PNT_TIB)(NtCurrentTeb());
 
-        if (!pTib->StackBase || !pTib->StackLimit)
-            return 0;
-
-        if ((Address < pTib->StackBase) && (Address > pTib->StackLimit)) {
+        if ((Address < pTib->StackBase) && (Address > pTib->StackLimit))
+            DoOutputDebugString("Address 0x%p within stack base = 0x%p, limit = 0x%p\r\n", Address, pTib->StackBase, pTib->StackLimit);
             return 1;
-        }
 
+        DoOutputDebugString("Address 0x%x not within stack base = 0x%p, limit = 0x%p\r\n", Address, pTib->StackBase, pTib->StackLimit);
         return 0;
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {
