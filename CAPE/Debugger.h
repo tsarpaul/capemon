@@ -64,7 +64,7 @@ PVOID CAPEExceptionFilterHandle;
 SAMPLE_HANDLER SampleVectoredHandler;
 PEXCEPTION_ROUTINE SEH_TopLevelHandler;
 LPTOP_LEVEL_EXCEPTION_FILTER OriginalExceptionHandler;
-//BOOL VECTORED_HANDLER;
+BOOL VECTORED_HANDLER;
 DWORD ChildProcessId;
 DWORD ChildThreadId;
 DWORD_PTR DebuggerEP;

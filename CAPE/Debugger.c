@@ -320,6 +320,26 @@ BOOL InitNewThreadBreakpoints(DWORD ThreadId)
 }
 
 //**************************************************************************************
+void OutputThreadBreakpoints(DWORD ThreadId)
+//**************************************************************************************
+{
+    PTHREADBREAKPOINTS ThreadBreakpoints = GetThreadBreakpoints(ThreadId);
+
+	if (!ThreadBreakpoints)
+        ThreadBreakpoints = CreateThreadBreakpoints(ThreadId);
+
+	if (!ThreadBreakpoints)
+    {
+        DoOutputDebugString("OutputThreadBreakpoints: Unable to create breakpoints for thread %d.\n", ThreadId);
+        return;
+    }
+
+    DoOutputDebugString("Breakpoints for thread %d: 0x%p, 0x%p, 0x%p, 0x%p.\n", ThreadId, ThreadBreakpoints->BreakpointInfo[0].Address, ThreadBreakpoints->BreakpointInfo[1].Address, ThreadBreakpoints->BreakpointInfo[2].Address, ThreadBreakpoints->BreakpointInfo[3].Address);
+
+	return;
+}
+
+//**************************************************************************************
 BOOL GetNextAvailableBreakpoint(DWORD ThreadId, unsigned int* Register)
 //**************************************************************************************
 {
@@ -1789,11 +1809,49 @@ BOOL ContextSetNextAvailableBreakpoint
 	PVOID	        Callback
 )
 {
+	PTHREADBREAKPOINTS CurrentThreadBreakpoint;
+
+    if (!Address)
+    {
+        DoOutputDebugString("ContextSetNextAvailableBreakpoint: Error - breakpoint address is zero!\n");
+        return FALSE;
+    }
+
+    if ((unsigned int)Register > 3 || (unsigned int)Register < 0)
+    {
+        DoOutputDebugString("ContextSetNextAvailableBreakpoint: Error - register value %d, can only have value 0-3.\n", Register);
+        return FALSE;
+    }
+
+    CurrentThreadBreakpoint = GetThreadBreakpoints(GetCurrentThreadId());
+
+    if (CurrentThreadBreakpoint == NULL)
+    {
+        DoOutputDebugString("ContextSetNextAvailableBreakpoint: Error - Failed to acquire thread breakpoints.\n");
+        return FALSE;
+    }
+
+    // Check whether an identical breakpoint already exists
+    for (unsigned int i = 0; i < NUMBER_OF_DEBUG_REGISTERS; i++)
+    {
+        if
+        (
+            CurrentThreadBreakpoint->BreakpointInfo[i].Size == Size &&
+            CurrentThreadBreakpoint->BreakpointInfo[i].Address == Address &&
+            CurrentThreadBreakpoint->BreakpointInfo[i].Type == Type
+        )
+        {
+            DoOutputDebugString("ContextSetNextAvailableBreakpoint: An identical breakpoint (%d) at 0x%p already exists for thread %d (process %d), skipping.\n", i, Address, CurrentThreadBreakpoint->ThreadId, GetCurrentProcessId());
+            return TRUE;
+        }
+    }
+
     if (Register)
     {
         if (!ContextGetNextAvailableBreakpoint(Context, Register))
         {
-            DoOutputDebugString("ContextSetNextAvailableBreakpoint: ContextGetNextAvailableBreakpoint failed\n");
+            DoOutputDebugString("ContextSetNextAvailableBreakpoint: No available breakpoints!\n");
+            OutputThreadBreakpoints(GetCurrentThreadId());
             return FALSE;
         }
 
@@ -1805,7 +1863,8 @@ BOOL ContextSetNextAvailableBreakpoint
 
         if (!ContextGetNextAvailableBreakpoint(Context, &TempRegister))
         {
-            DoOutputDebugString("ContextSetNextAvailableBreakpoint: ContextGetNextAvailableBreakpoint failed\n");
+            DoOutputDebugString("ContextSetNextAvailableBreakpoint: No available breakpoints!\n");
+            OutputThreadBreakpoints(GetCurrentThreadId());
             return FALSE;
         }
 
