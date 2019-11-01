@@ -134,6 +134,10 @@ BOOL SetSingleStepMode(PCONTEXT Context, PVOID Handler);
 BOOL SetResumeFlag(PCONTEXT Context);
 BOOL SetZeroFlag(PCONTEXT Context);
 BOOL ClearZeroFlag(PCONTEXT Context);
+BOOL FlipZeroFlag(PCONTEXT Context);
+BOOL SetSignFlag(PCONTEXT Context);
+BOOL ClearSignFlag(PCONTEXT Context);
+BOOL FlipSignFlag(PCONTEXT Context);
 PTHREADBREAKPOINTS CreateThreadBreakpoints(DWORD ThreadId);
 
 // Get

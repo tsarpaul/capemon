@@ -61,14 +61,16 @@ BOOL BreakpointCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_POINT
 
 BOOL DoSetSingleStepMode(int Register, PCONTEXT Context, PVOID Handler)
 {
-    StepOverRegister = Register;
+    GetNextAvailableBreakpoint(GetCurrentThreadId(), &StepOverRegister);
+    if (!StepOverRegister)
+        StepOverRegister = Register;
     return SetSingleStepMode(Context, Trace);
 }
 
 BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
 {
 	PVOID ReturnAddress, CIP;
-    BOOL StepOver;
+    BOOL StepOver, ForceStepOver;
     unsigned int DllRVA;
 #ifdef BRANCH_TRACE
     PVOID BranchTarget;
@@ -227,15 +229,16 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
     {
         PCHAR ExportName;
         StepOver = FALSE;
+        ForceStepOver = FALSE;
 
         if (FilterTrace && !TraceAll)
             StepOver = TRUE;
         else if (DecodedInstruction.size > 4 && DecodedInstruction.operands.length && !strncmp(DecodedInstruction.operands.p, "DWORD", 5) && strncmp(DecodedInstruction.operands.p, "DWORD [E", 8))
         {
-            PVOID *CallTarget = *(PVOID*)((PUCHAR)CIP + DecodedInstruction.size - 4);
+            PVOID CallTarget = *(PVOID*)((PUCHAR)CIP + DecodedInstruction.size - 4);
             __try
             {
-                ExportName = ScyllaGetExportNameByAddress(*CallTarget, NULL);
+                ExportName = ScyllaGetExportNameByAddress(CallTarget, NULL);
             }
             __except(EXCEPTION_EXECUTE_HANDLER)
             {
@@ -248,8 +251,18 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
                 DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", ExportName);
                 StepOver = TRUE;
             }
+            else if (!strncmp(DecodedInstruction.operands.p, "DWORD [0x", 9))
+            {
+                DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", (char*)DecodedInstruction.operands.p);
+            }
+            else if (!strncmp(DecodedInstruction.operands.p, "DWORD [FS:0xc0]", 15))
+            {
+                DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s%-30s", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", (char*)DecodedInstruction.operands.p);
+                DebuggerOutput("\nGWATAMALA");
+                ForceStepOver = TRUE;
+            }
             else
-                DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s0x%-28x", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", *CallTarget);
+                DebuggerOutput("0x%x (%02d) %-20s %-6s%-4s0x%-28x", CIP, DecodedInstruction.size, (char*)DecodedInstruction.instructionHex.p, (char*)DecodedInstruction.mnemonic.p, DecodedInstruction.operands.length != 0 ? " " : "", CallTarget);
         }
         else if (DecodedInstruction.size > 4)
         {
@@ -413,13 +426,14 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
             }
         }
 
-        if (((unsigned int)abs(TraceDepthCount) >= TraceDepthLimit && !TraceAll) || (StepOver == TRUE && !TraceAll))
+        if (((unsigned int)abs(TraceDepthCount) >= TraceDepthLimit && !TraceAll) || (StepOver == TRUE && !TraceAll) || ForceStepOver)
         {
             ReturnAddress = (PVOID)((PUCHAR)CIP + DecodedInstruction.size);
             if (!ContextSetThreadBreakpoint(ExceptionInfo->ContextRecord, StepOverRegister, 0, (BYTE*)ReturnAddress, BP_EXEC, BreakpointCallback))
-            {
                 DoOutputDebugString("Trace: Failed to set breakpoint on return address 0x%p\n", ReturnAddress);
-            }
+
+            if (ForceStepOver)
+                DoOutputDebugString("Trace: Set breakpoint on return address 0x%p\n", ReturnAddress);
 
             LastContext = *ExceptionInfo->ContextRecord;
 
@@ -483,6 +497,26 @@ BOOL Trace(struct _EXCEPTION_POINTERS* ExceptionInfo)
         {
             SetZeroFlag(ExceptionInfo->ContextRecord);
             DebuggerOutput("\nTrace: %s detected, setting zero flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "FlipZeroFlag"))
+        {
+            FlipZeroFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, flipping zero flag (action0).\n", Instruction0);
+        }
+        if (!stricmp(Action0, "ClearSignFlag"))
+        {
+            ClearSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, clearing Sign flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "SetSignFlag"))
+        {
+            SetSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, setting Sign flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "FlipSignFlag"))
+        {
+            FlipSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, flipping Sign flag (action0).\n", Instruction0);
         }
 #ifndef _WIN64
         else if (!stricmp(Action0, "PrintEAX"))
@@ -825,12 +859,32 @@ BOOL BreakpointCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_POINT
         if (!stricmp(Action0, "ClearZeroFlag"))
         {
             ClearZeroFlag(ExceptionInfo->ContextRecord);
-            DebuggerOutput("\nBreakpointCallback: %s detected, clearing zero flag (action0).", Instruction0);
+            DebuggerOutput("\nTrace: %s detected, clearing zero flag (action0).\n", Instruction0);
         }
         else if (!stricmp(Action0, "SetZeroFlag"))
         {
             SetZeroFlag(ExceptionInfo->ContextRecord);
-            DebuggerOutput("\nBreakpointCallback: %s detected, setting zero flag (action0).", Instruction0);
+            DebuggerOutput("\nTrace: %s detected, setting zero flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "FlipZeroFlag"))
+        {
+            FlipZeroFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, flipping zero flag (action0).\n", Instruction0);
+        }
+        if (!stricmp(Action0, "ClearSignFlag"))
+        {
+            ClearSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, clearing Sign flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "SetSignFlag"))
+        {
+            SetSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, setting Sign flag (action0).\n", Instruction0);
+        }
+        else if (!stricmp(Action0, "FlipSignFlag"))
+        {
+            FlipSignFlag(ExceptionInfo->ContextRecord);
+            DebuggerOutput("\nTrace: %s detected, flipping Sign flag (action0).\n", Instruction0);
         }
 #ifndef _WIN64
         else if (!stricmp(Action0, "PrintEAX"))
@@ -1090,7 +1144,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
 
         if (SetBreakpoint(Register, 0, (BYTE*)BreakpointVA, Type1, Callback))
         {
-            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)", Register, BreakpointVA, bp1, Type1);
+            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)\n", Register, BreakpointVA, bp1, Type1);
             BreakpointsSet = TRUE;
         }
         else
@@ -1126,7 +1180,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
 
         if (SetBreakpoint(Register, 0, (BYTE*)BreakpointVA, Type2, Callback))
         {
-            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)", Register, BreakpointVA, bp2, Type2);
+            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)\n", Register, BreakpointVA, bp2, Type2);
             BreakpointsSet = TRUE;
         }
         else
@@ -1162,7 +1216,7 @@ BOOL SetInitialBreakpoints(PVOID ImageBase)
 
         if (SetBreakpoint(Register, 0, (BYTE*)BreakpointVA, Type3, Callback))
         {
-            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)", Register, BreakpointVA, bp3, Type3);
+            DebuggerOutput("Breakpoint %d set on address 0x%p (RVA 0x%x, type %d)\n", Register, BreakpointVA, bp3, Type3);
             BreakpointsSet = TRUE;
         }
         else

@@ -329,7 +329,7 @@ int read_config(void)
                 }
                 else {
                     bp0 = (PVOID)(DWORD_PTR)strtoul(value, NULL, 0);
-                    DoOutputDebugString("Config: bp0 set to 0x%x. (%s)\n", bp0, value);
+                    DoOutputDebugString("Config: bp0 set to 0x%x.\n", bp0);
                 }
 			}
             else if (!stricmp(key, "bp1")) {

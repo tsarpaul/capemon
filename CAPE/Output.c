@@ -264,7 +264,7 @@ void DebuggerOutput(_In_ LPCTSTR lpOutputString, ...)
         return;
     }
 
-    char *FullPathName,*OutputFilename;
+    char *FullPathName, *OutputFilename, *Character;
 
     FullPathName = GetResultsPath("debugger");
 
@@ -313,7 +313,13 @@ void DebuggerOutput(_In_ LPCTSTR lpOutputString, ...)
 
     memset(DebuggerLine, 0, MAX_PATH*sizeof(CHAR));
     _vsnprintf_s(DebuggerLine, MAX_PATH, _TRUNCATE, lpOutputString, args);
-
+    Character = DebuggerLine;
+    while (*Character)
+    {   // Restrict to ASCII range
+        if (*Character < 0x0a || *Character > 0x7E)
+            *Character = 0x3F;  // '?'
+        Character++;
+    }
     WriteFile(DebuggerLog, DebuggerLine, (DWORD)strlen(DebuggerLine), (LPDWORD)&LastWriteLength, NULL);
 
     va_end(args);
