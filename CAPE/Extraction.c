@@ -114,6 +114,7 @@ extern unsigned int address_is_in_stack(PVOID Address);
 extern ULONG_PTR g_our_dll_base;
 extern DWORD g_our_dll_size;
 extern HANDLE g_terminate_event_handle;
+extern PVOID ImageBase;
 
 extern int operate_on_backtrace(ULONG_PTR _esp, ULONG_PTR _ebp, void *extra, int(*func)(void *, ULONG_PTR));
 extern int WINAPI enter_hook(ULONG_PTR *h, ULONG_PTR sp, ULONG_PTR ebp_or_rip);
@@ -228,7 +229,8 @@ PTRACKEDREGION GetTrackedRegion(PVOID Address)
 
 	while (CurrentTrackedRegion)
 	{
-        if ((DWORD_PTR)Address >= (DWORD_PTR)CurrentTrackedRegion->AllocationBase && (DWORD_PTR)Address < ((DWORD_PTR)CurrentTrackedRegion->AllocationBase + (DWORD_PTR)CurrentTrackedRegion->RegionSize))
+        //DoOutputDebugString("GetTrackedRegion: AllocationBase 0x%p RegionSize 0x%d.\n", CurrentTrackedRegion->AllocationBase, CurrentTrackedRegion->RegionSize);
+        if (GetAllocationBase(Address) == CurrentTrackedRegion->AllocationBase)
             return CurrentTrackedRegion;
 
         CurrentTrackedRegion = CurrentTrackedRegion->NextTrackedRegion;
@@ -265,12 +267,9 @@ PTRACKEDREGION CreateTrackedRegion()
 PTRACKEDREGION AddTrackedRegion(PVOID Address, SIZE_T RegionSize, ULONG Protect)
 //**************************************************************************************
 {
-    BOOL PageAlreadyTracked;
-    PTRACKEDREGION CurrentTrackedRegion, PreviousTrackedRegion;
-    unsigned int NumberOfTrackedRegions;
-
-    NumberOfTrackedRegions = 0;
-    PreviousTrackedRegion = NULL;
+    BOOL PageAlreadyTracked = FALSE;
+    unsigned int NumberOfTrackedRegions = 0;
+    PTRACKEDREGION TrackedRegion, PreviousTrackedRegion = NULL;
 
     if (!Address)
         return NULL;
@@ -278,22 +277,13 @@ PTRACKEDREGION AddTrackedRegion(PVOID Address, SIZE_T RegionSize, ULONG Protect)
     if (TrackedRegionList == NULL)
         CreateTrackedRegion();
 
-    CurrentTrackedRegion = TrackedRegionList;
+    TrackedRegion = TrackedRegionList;
 
-	while (CurrentTrackedRegion)
+	while (TrackedRegion)
 	{
-        if ((DWORD_PTR)Address >= (DWORD_PTR)CurrentTrackedRegion->AllocationBase && (DWORD_PTR)Address < ((DWORD_PTR)CurrentTrackedRegion->AllocationBase + (DWORD_PTR)CurrentTrackedRegion->RegionSize))
-        {
-            PageAlreadyTracked = TRUE;
-            break;
-        }
-		else
-            PageAlreadyTracked = FALSE;
-
         NumberOfTrackedRegions++;
-
-        PreviousTrackedRegion = CurrentTrackedRegion;
-        CurrentTrackedRegion = CurrentTrackedRegion->NextTrackedRegion;
+        PreviousTrackedRegion = TrackedRegion;
+        TrackedRegion = TrackedRegion->NextTrackedRegion;
 	}
 
 	if (NumberOfTrackedRegions > 10)
@@ -305,67 +295,76 @@ PTRACKEDREGION AddTrackedRegion(PVOID Address, SIZE_T RegionSize, ULONG Protect)
 		return NULL;
 	}
 
-	if (!PageAlreadyTracked)
+    TrackedRegion = GetTrackedRegion(Address);
+    DoOutputDebugString("AddTrackedRegion: GetTrackedRegion(0x%p) returned 0x%p.\n", Address, TrackedRegion);
+
+    if (!TrackedRegion)
     {
         // We haven't found it in the linked list, so create a new one
-        CurrentTrackedRegion = PreviousTrackedRegion;
+        TrackedRegion = PreviousTrackedRegion;
 
-        CurrentTrackedRegion->NextTrackedRegion = ((struct TrackedRegion*)malloc(sizeof(struct TrackedRegion)));
+        TrackedRegion->NextTrackedRegion = ((struct TrackedRegion*)malloc(sizeof(struct TrackedRegion)));
 
-        if (CurrentTrackedRegion->NextTrackedRegion == NULL)
+        if (TrackedRegion->NextTrackedRegion == NULL)
         {
             DoOutputDebugString("AddTrackedRegion: Failed to allocate new tracked region struct.\n");
             return NULL;
         }
 
-        memset(CurrentTrackedRegion->NextTrackedRegion, 0, sizeof(struct TrackedRegion));
+        TrackedRegion = TrackedRegion->NextTrackedRegion;
+
+        memset(TrackedRegion, 0, sizeof(struct TrackedRegion));
+        DoOutputDebugString("AddTrackedRegion: Created new tracked region: TrackedRegion->AllocationBase 0x%p.\n", TrackedRegion->AllocationBase);
     }
     else
-        DoOutputDebugString("AddTrackedRegion: Region at 0x%p already in tracked region 0x%p.\n", Address, CurrentTrackedRegion->AllocationBase);
+    {
+        PageAlreadyTracked = TRUE;
+        DoOutputDebugString("AddTrackedRegion: Region at 0x%p already in tracked region 0x%p - updating.\n", Address, TrackedRegion->AllocationBase);
+    }
 
-    if (!VirtualQuery(Address, &CurrentTrackedRegion->MemInfo, sizeof(MEMORY_BASIC_INFORMATION)))
+    if (!VirtualQuery(Address, &TrackedRegion->MemInfo, sizeof(MEMORY_BASIC_INFORMATION)))
     {
         DoOutputErrorString("AddTrackedRegion: unable to query memory region 0x%p", Address);
         return NULL;
     }
+    DoOutputDebugString("AddTrackedRegion: VirtualQuery(0x%p) -> AllocationBase 0x%p RegionSize 0x%d.\n", Address, TrackedRegion->MemInfo.AllocationBase, TrackedRegion->MemInfo.RegionSize);
 
-    CurrentTrackedRegion->AllocationBase = CurrentTrackedRegion->MemInfo.AllocationBase;
+    TrackedRegion->AllocationBase = TrackedRegion->MemInfo.AllocationBase;
 
-    if (Address != CurrentTrackedRegion->AllocationBase)
-        CurrentTrackedRegion->ProtectAddress = Address;
+    if (Address != TrackedRegion->AllocationBase)
+        TrackedRegion->ProtectAddress = Address;
 
-    // We don't want the total size of region (until we can handle exceptions without failing the scans)
-    if (RegionSize)
-        CurrentTrackedRegion->RegionSize = (SIZE_T)((PBYTE)Address + RegionSize - (PBYTE)CurrentTrackedRegion->AllocationBase);
+    if (RegionSize && RegionSize > TrackedRegion->MemInfo.RegionSize)
+        TrackedRegion->RegionSize = RegionSize;
     else
-        CurrentTrackedRegion->RegionSize = CurrentTrackedRegion->MemInfo.RegionSize;
+        TrackedRegion->RegionSize = TrackedRegion->MemInfo.RegionSize;
 
     if (Protect)
-        CurrentTrackedRegion->Protect = Protect;
+        TrackedRegion->Protect = Protect;
     else
-        CurrentTrackedRegion->Protect = CurrentTrackedRegion->MemInfo.Protect;
+        TrackedRegion->Protect = TrackedRegion->MemInfo.Protect;
 
     // If the region is a PE image
-    CurrentTrackedRegion->EntryPoint = GetEntryPoint(CurrentTrackedRegion->AllocationBase);
-    if (CurrentTrackedRegion->EntryPoint)
+    TrackedRegion->EntryPoint = GetEntryPoint(TrackedRegion->AllocationBase);
+    if (TrackedRegion->EntryPoint)
     {
-        CurrentTrackedRegion->Entropy = GetEntropy((PUCHAR)CurrentTrackedRegion->AllocationBase);
-        if (CurrentTrackedRegion->Entropy)
-            DoOutputDebugString("AddTrackedRegion: EntryPoint 0x%x, Entropy %e", CurrentTrackedRegion->EntryPoint, CurrentTrackedRegion->Entropy);
+        TrackedRegion->Entropy = GetEntropy((PUCHAR)TrackedRegion->AllocationBase);
+        if (TrackedRegion->Entropy)
+            DoOutputDebugString("AddTrackedRegion: EntryPoint 0x%x, Entropy %e", TrackedRegion->EntryPoint, TrackedRegion->Entropy);
         else
             DoOutputDebugString("AddTrackedRegion: GetEntropy failed.");
 
-        CurrentTrackedRegion->MinPESize = GetMinPESize(CurrentTrackedRegion->AllocationBase);
-        if (CurrentTrackedRegion->MinPESize)
-            DoOutputDebugString("AddTrackedRegion: Min PE size 0x%x", CurrentTrackedRegion->MinPESize);
+        TrackedRegion->MinPESize = GetMinPESize(TrackedRegion->AllocationBase);
+        if (TrackedRegion->MinPESize)
+            DoOutputDebugString("AddTrackedRegion: Min PE size 0x%x", TrackedRegion->MinPESize);
         //else
         //    DoOutputDebugString("AddTrackedRegion: GetMinPESize failed");
     }
 
 	if (!PageAlreadyTracked)
-        DoOutputDebugString("AddTrackedRegion: Region at 0x%p size 0x%x added to tracked regions.\n", CurrentTrackedRegion->AllocationBase, CurrentTrackedRegion->RegionSize);
+        DoOutputDebugString("AddTrackedRegion: New region at 0x%p size 0x%x added to tracked regions.\n", TrackedRegion->AllocationBase, TrackedRegion->RegionSize);
 
-    return CurrentTrackedRegion;
+    return TrackedRegion;
 }
 
 //**************************************************************************************
@@ -914,13 +913,14 @@ void ProcessImageBase(PTRACKEDREGION TrackedRegion)
     if (!TrackedRegion)
         return;
 
-    if (TrackedRegion->AllocationBase != GetModuleHandle(NULL))
+    if (TrackedRegion->AllocationBase != GetModuleHandle(NULL) && TrackedRegion->AllocationBase != ImageBase)
         return;
 
     EntryPoint = GetEntryPoint(TrackedRegion->AllocationBase);
     MinPESize = GetMinPESize(TrackedRegion->AllocationBase);
     Entropy = GetEntropy(TrackedRegion->AllocationBase);
 
+    DoOutputDebugString("ProcessImageBase: EP 0x%p image base 0x%p size 0x%x entropy %e.\n", EntryPoint, TrackedRegion->AllocationBase, MinPESize, Entropy);
     if (TrackedRegion->EntryPoint && (TrackedRegion->EntryPoint != EntryPoint))
         DoOutputDebugString("ProcessImageBase: Modified entry point (0x%p) detected at image base 0x%p - dumping.\n", EntryPoint, TrackedRegion->AllocationBase);
     else if (TrackedRegion->MinPESize && TrackedRegion->MinPESize != MinPESize)
@@ -936,7 +936,8 @@ void ProcessImageBase(PTRACKEDREGION TrackedRegion)
 
     SetCapeMetaData(EXTRACTION_PE, 0, NULL, TrackedRegion->AllocationBase);
 
-    DumpCurrentProcessFixImports((PVOID)TrackedRegion->EntryPoint);
+    //DumpCurrentProcessFixImports((PVOID)TrackedRegion->EntryPoint);
+    DumpImageInCurrentProcess(TrackedRegion->AllocationBase);
 }
 
 //**************************************************************************************
@@ -950,6 +951,9 @@ void ProcessTrackedRegion(PTRACKEDREGION TrackedRegion)
         return;
 
     if (TrackedRegion->PagesDumped)
+        return;
+
+    if (!TrackedRegion->AllocationBase || !TrackedRegion->RegionSize)
         return;
 
     if (!ScanForNonZero(TrackedRegion->AllocationBase, TrackedRegion->RegionSize))
@@ -977,8 +981,6 @@ void ProcessTrackedRegion(PTRACKEDREGION TrackedRegion)
         else
             DoOutputDebugString("ProcessTrackedRegion: failed to dump executable memory range at 0x%p.\n", TrackedRegion->AllocationBase);
     }
-    //else
-    //    DoOutputDebugString("ProcessTrackedRegion: Memory range at 0x%p is not executable.\n", TrackedRegion->AllocationBase);
 }
 
 //**************************************************************************************
@@ -987,12 +989,14 @@ void ProcessTrackedRegions()
 {
     PTRACKEDREGION TrackedRegion = TrackedRegionList;
 
-    while (TrackedRegion && TrackedRegion->AllocationBase && TrackedRegion->RegionSize)
+    while (TrackedRegion)
     {
-        if (TrackedRegion->AllocationBase == GetModuleHandle(NULL))
+        DoOutputDebugString("ProcessTrackedRegions: Processing region at 0x%p.\n", TrackedRegion->AllocationBase);
+        if (TrackedRegion->AllocationBase == ImageBase)
             ProcessImageBase(TrackedRegion);
         else
             ProcessTrackedRegion(TrackedRegion);
+
         TrackedRegion = TrackedRegion->NextTrackedRegion;
     }
 }
@@ -1048,7 +1052,10 @@ void AllocationHandler(PVOID BaseAddress, SIZE_T RegionSize, ULONG AllocationTyp
         return;
     }
     else
+    {
+        DoOutputDebugString("AllocationHandler: Adding allocation to tracked region list: 0x%p, size: 0x%x.\n", BaseAddress, RegionSize);
         TrackedRegion = AddTrackedRegion(BaseAddress, RegionSize, Protect);
+    }
 
     if (!TrackedRegion)
     {
@@ -1129,16 +1136,9 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
     if (TrackedRegionList)
         TrackedRegion = GetTrackedRegion(Address);
 
-    if (TrackedRegion && TrackedRegion->PagesDumped)
-    {
-        DoOutputDebugString("ProtectionHandler: Current tracked region has already been dumped.\n");
-        hook_enable();
-        return;
-    }
-
-    //if (TrackedRegion && TrackedRegion->BreakpointsSet)
+    //if (TrackedRegion && TrackedRegion->PagesDumped)
     //{
-    //    DoOutputDebugString("ActivateBreakpoints: Current tracked region already has breakpoints set.\n");
+    //    DoOutputDebugString("ProtectionHandler: Current tracked region has already been dumped.\n");
     //    hook_enable();
     //    return;
     //}
@@ -1147,11 +1147,14 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
     if (!TrackedRegion)
     {
         ProcessTrackedRegions();
+        DoOutputDebugString("ProtectionHandler: Adding region at 0x%p to tracked regions.\n", Address);
         TrackedRegion = AddTrackedRegion(Address, RegionSize, Protect);
         NewRegion = TRUE;
     }
     else
-        DoOutputDebugString("ProtectionHandler: Address 0x%p already in tracked region at 0x%p.\n", Address, TrackedRegion->AllocationBase);
+    {
+        DoOutputDebugString("ProtectionHandler: Address 0x%p already in tracked region at 0x%p, size 0x%x\n", Address, TrackedRegion->AllocationBase, TrackedRegion->RegionSize);
+    }
 
     if (!TrackedRegion)
     {
@@ -1184,7 +1187,7 @@ void ProtectionHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect, ULONG Ol
         DoOutputDebugString("ProtectionHandler: Updated region protection at 0x%p to 0x%x.\n", Address, Protect);
     }
 
-    if (TrackedRegion->AllocationBase == GetModuleHandle(NULL))
+    if (TrackedRegion->AllocationBase == ImageBase || TrackedRegion->AllocationBase == GetModuleHandle(NULL))
     {
         ProcessImageBase(TrackedRegion);
         hook_enable();
@@ -1339,7 +1342,10 @@ void MapSectionViewHandler(PVOID Address, SIZE_T RegionSize, ULONG Protect)
 
     }
     else
+    {
+        DoOutputDebugString("MapSectionViewHandler: Adding range at 0x%p to tracked regions.\n", Address);
         TrackedRegion = AddTrackedRegion(Address, RegionSize, Protect);
+    }
 
     TrackedRegion->ProtectAddress = Address;
 
@@ -2143,6 +2149,13 @@ BOOL EntryPointWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_
 //**************************************************************************************
 {
 	PTRACKEDREGION TrackedRegion;
+    DWORD SizeOfHeaders;
+    PIMAGE_DOS_HEADER pDosHeader;
+#ifdef _WIN64
+	PIMAGE_NT_HEADERS64 pNtHeader;
+#else
+	PIMAGE_NT_HEADERS32 pNtHeader;
+#endif
 
     if (pBreakpointInfo == NULL)
 	{
@@ -2180,9 +2193,47 @@ BOOL EntryPointWriteCallback(PBREAKPOINTINFO pBreakpointInfo, struct _EXCEPTION_
         return FALSE;
     }
 
+    TrackedRegion->EntryPoint = (DWORD)pBreakpointInfo->Address;
+
     DoOutputDebugString("EntryPointWriteCallback: Execution bp %d set on EntryPoint address 0x%p.\n", TrackedRegion->ExecBpRegister, pBreakpointInfo->Address);
 
-    TrackedRegion->EntryPoint = (DWORD)pBreakpointInfo->Address;
+    pDosHeader = (PIMAGE_DOS_HEADER)TrackedRegion->AllocationBase;
+
+    if (!pDosHeader->e_lfanew)
+    {
+        DoOutputDebugString("EntryPointWriteCallback: pointer to PE header zero.\n");
+        return FALSE;
+    }
+
+    if ((ULONG)pDosHeader->e_lfanew > PE_HEADER_LIMIT)
+    {
+        DoOutputDebugString("EntryPointWriteCallback: pointer to PE header too big: 0x%p.\n", pDosHeader->e_lfanew);
+        return FALSE;
+    }
+
+    pNtHeader = (PIMAGE_NT_HEADERS)((BYTE*)TrackedRegion->AllocationBase + pDosHeader->e_lfanew);
+
+    SizeOfHeaders = pDosHeader->e_lfanew + FIELD_OFFSET(IMAGE_NT_HEADERS, OptionalHeader) + pNtHeader->FileHeader.SizeOfOptionalHeader;
+
+    if (pNtHeader->FileHeader.NumberOfSections && pNtHeader->FileHeader.SizeOfOptionalHeader && pNtHeader->OptionalHeader.SizeOfImage)
+    {
+        PIMAGE_SECTION_HEADER FinalSectionHeader = (PIMAGE_SECTION_HEADER)((BYTE*)TrackedRegion->AllocationBase + SizeOfHeaders + (sizeof(IMAGE_SECTION_HEADER) * (pNtHeader->FileHeader.NumberOfSections - 1)));
+
+        DoOutputDebugString("EntryPointWriteCallback: DEBUG: NumberOfSections %d, SizeOfHeaders 0x%x.\n", pNtHeader->FileHeader.NumberOfSections, SizeOfHeaders);
+
+        if (FinalSectionHeader->VirtualAddress && FinalSectionHeader->SizeOfRawData && (FinalSectionHeader->VirtualAddress + FinalSectionHeader->SizeOfRawData <= pNtHeader->OptionalHeader.SizeOfImage))
+        {
+            PVOID FinalByteAddress = (BYTE*)TrackedRegion->AllocationBase + FinalSectionHeader->VirtualAddress + FinalSectionHeader->SizeOfRawData - 1;
+
+            if (!ContextUpdateCurrentBreakpoint(ExceptionInfo->ContextRecord, sizeof(BYTE), FinalByteAddress, BP_WRITE, FinalByteWriteCallback))
+            {
+                DoOutputDebugString("EntryPointWriteCallback: ContextUpdateCurrentBreakpoint failed to set write bp on final section, (address: 0x%p).\n", FinalByteAddress);
+                return FALSE;
+            }
+
+            DoOutputDebugString("EntryPointWriteCallback: Set write breakpoint on final section, last byte: 0x%p\n", *((BYTE*)TrackedRegion->AllocationBase + FinalSectionHeader->VirtualAddress + FinalSectionHeader->SizeOfRawData));
+        }
+    }
 
 	return TRUE;
 }
@@ -3111,8 +3162,33 @@ BOOL ActivateBreakpoints(PTRACKEDREGION TrackedRegion, struct _EXCEPTION_POINTER
     return TRUE;    // this should set TrackedRegion->BreakpointsSet in calling function
 }
 
+void ExtractionDllInit(PVOID DllBase)
+{
+    // We remove exe (rundll32) image from tracked regions
+    if (!DropTrackedRegion(GetTrackedRegion(GetModuleHandle(NULL))))
+        DoOutputDebugString("ExtractionDllInit: Error removing exe image base from tracked regions.\n");
+
+    ImageBase = DllBase;
+
+    // We add the dll image to tracked regions
+    PTRACKEDREGION TrackedRegion = GetTrackedRegion(DllBase);
+    if (!TrackedRegion)
+    {
+        DoOutputDebugString("ExtractionDllInit: Adding target dll image base to tracked regions.\n");
+        TrackedRegion = AddTrackedRegion(DllBase, 0, 0);
+    }
+    else
+    {
+        TrackedRegion->PagesDumped = FALSE;
+    }
+}
+
 void ExtractionInit()
 {
+//    if (!wcsnicmp(our_commandline, L"c:\\windows\\system32\\rundll32.exe", 32) ||
+//        !wcsnicmp(our_commandline, L"c:\\windows\\syswow64\\rundll32.exe", 32) ||
+//        !wcsnicmp(our_commandline, L"c:\\windows\\sysnative\\rundll32.exe", 33))
+//            return
     CapeMetaData->DumpType = EXTRACTION_PE;
 
     // We add the main image to tracked regions

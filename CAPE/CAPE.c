@@ -142,7 +142,7 @@ extern void ExtractionInit();
 #endif
 
 BOOL ProcessDumped, FilesDumped, ModuleDumped;
-static PVOID ImageBase;
+PVOID ImageBase;
 static unsigned int DumpCount;
 
 static __inline ULONG_PTR get_stack_top(void)
@@ -2123,8 +2123,6 @@ void DumpInterestingRegions(MEMORY_BASIC_INFORMATION MemInfo, PVOID CallerBase)
 int DoProcessDump(PVOID CallerBase)
 //**************************************************************************************
 {
-	HANDLE hSnapShot;
-    THREADENTRY32 ThreadInfo;
     PUCHAR Address;
     MEMORY_BASIC_INFORMATION MemInfo;
     HANDLE FileHandle;
@@ -2137,9 +2135,6 @@ int DoProcessDump(PVOID CallerBase)
     else
         ImageBase = GetModuleHandle(NULL);
 
-	PHANDLE SuspendedThreads = (PHANDLE)malloc(SUSPENDED_THREAD_MAX*sizeof(HANDLE));
-	DWORD ThreadId = GetCurrentThreadId(), SuspendedThreadCount = 0;
-
     if (!SystemInfo.dwPageSize)
         GetSystemInfo(&SystemInfo);
 
@@ -2149,24 +2144,6 @@ int DoProcessDump(PVOID CallerBase)
         goto out;
     }
 
-    // suspend other threads before dump
-    hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-	Thread32First(hSnapShot, &ThreadInfo);
-
-	do
-    {
-		if (ThreadInfo.th32OwnerProcessID != CapeMetaData->Pid || ThreadInfo.th32ThreadID == ThreadId || SuspendedThreadCount >= SUSPENDED_THREAD_MAX)
-			continue;
-
-        SuspendedThreads[SuspendedThreadCount] = OpenThread(THREAD_SUSPEND_RESUME, FALSE, ThreadInfo.th32ThreadID);
-
-        if (SuspendedThreads[SuspendedThreadCount])
-        {
-			SuspendThread(SuspendedThreads[SuspendedThreadCount]);
-			SuspendedThreadCount++;
-		}
-	}
-    while(Thread32Next(hSnapShot, &ThreadInfo));
 
     if (g_config.procmemdump)
     {
@@ -2266,16 +2243,6 @@ out:
             free(FullDumpPath);
     }
 
-    if (SuspendedThreads)
-    {
-        for (unsigned int i = 0; i < SuspendedThreadCount; i++)
-        {
-            ResumeThread(SuspendedThreads[i]);
-            CloseHandle(SuspendedThreads[i]);
-        }
-        free(SuspendedThreads);
-    }
-
 	LeaveCriticalSection(&ProcessDumpCriticalSection);
     return ProcessDumped;
 }
@@ -2327,7 +2294,7 @@ void RestoreHeaders()
 
 void init_CAPE()
 {
-    char* CommandLine;
+    char *CommandLine, *Character;
 
     // Restore headers in case of IAT patching
     RestoreHeaders();
@@ -2339,11 +2306,30 @@ void init_CAPE()
     CapeMetaData->Pid = GetCurrentProcessId();
     CapeMetaData->ProcessPath = (char*)malloc(MAX_PATH);
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_process_path_w, (int)wcslen(our_process_path_w)+1, CapeMetaData->ProcessPath, MAX_PATH, NULL, NULL);
+    Character = CapeMetaData->ProcessPath;
+
+    // It seems with CP_ACP or CP_UTF8 & WC_NO_BEST_FIT_CHARS, WideCharToMultiByte still
+    // leaves characters that encode("utf-8"... can't encode...
+    while (*Character)
+    {   // Restrict to ASCII range
+        if (*Character < 0x0a || *Character > 0x7E)
+            *Character = 0x3F;  // '?'
+        Character++;
+    }
 
     CommandLine = (char*)malloc(MAX_PATH);
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, (LPCWSTR)our_commandline, (int)wcslen(our_commandline)+1, CommandLine, MAX_PATH, NULL, NULL);
 
+    // This is package (and technique) dependent:
+    CapeMetaData->DumpType = PROCDUMP;
+    ProcessDumped = FALSE;
+
     DumpCount = 0;
+
+    // This flag controls whether a dump is automatically
+    // made at the end of a process' lifetime.
+    // It is normally only set in the base packages,
+    // or upon submission. (This overrides submission.)
     g_config.procdump = 0;
 
     InitializeCriticalSection(&ProcessDumpCriticalSection);
@@ -2351,6 +2337,7 @@ void init_CAPE()
     lookup_add(&g_caller_regions, (ULONG_PTR)GetModuleHandle(NULL), 0);
     lookup_add(&g_caller_regions, (ULONG_PTR)g_our_dll_base, 0);
 
+    // Cuckoo debug output level for development (0=none, 2=max)
     // g_config.debug = 2;
 #endif
 
@@ -2361,10 +2348,11 @@ void init_CAPE()
         else
             DoOutputDebugString("Failed to initialise debugger.\n");
 
+    ImageBase = GetModuleHandle(NULL);
 #ifdef _WIN64
-    DoOutputDebugString("CAPE initialised: 64-bit Extraction package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 64-bit Extraction package loaded in process %d at 0x%p, image base 0x%p, stack from 0x%p-0x%p\n", GetCurrentProcessId(), g_our_dll_base, ImageBase, get_stack_bottom(), get_stack_top());
 #else
-    DoOutputDebugString("CAPE initialised: 32-bit Extraction package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, GetModuleHandle(NULL), get_stack_bottom(), get_stack_top());
+    DoOutputDebugString("CAPE initialised: 32-bit Extraction package loaded in process %d at 0x%x, image base 0x%x, stack from 0x%x-0x%x\n", GetCurrentProcessId(), g_our_dll_base, ImageBase, get_stack_bottom(), get_stack_top());
 #endif
 
     DoOutputDebugString("Commandline: %s.\n", CommandLine);

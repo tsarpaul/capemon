@@ -48,6 +48,7 @@ extern ULONG_PTR base_of_dll_of_interest;
 extern BOOL SetInitialBreakpoints(PVOID ImageBase);
 #endif
 extern PCHAR ScyllaGetExportDirectory(PVOID Address);
+extern void ExtractionDllInit(PVOID DllBase);
 
 void disable_tail_call_optimization(void)
 {
@@ -364,6 +365,8 @@ static hook_t g_hooks[] = {
 #ifndef _WIN64
 	HOOK(ntdll, memcpy),
 #endif
+	HOOK(kernel32, OutputDebugStringA),
+	HOOK(kernel32, OutputDebugStringW),
 	HOOK(kernel32, HeapCreate),
 	HOOK(msvcrt, memcpy),
     HOOK(msvcrt, srand),
@@ -704,6 +707,9 @@ VOID CALLBACK New_DllLoadNotification(
             DoOutputDebugString("Target DLL loaded at 0x%p: %ws (0x%x bytes).\n", NotificationData->Loaded.DllBase, library.Buffer, NotificationData->Loaded.SizeOfImage);
 #ifdef CAPE_TRACE
             SetInitialBreakpoints((PVOID)base_of_dll_of_interest);
+#endif
+#ifdef CAPE_EXTRACTION
+            ExtractionDllInit((PVOID)base_of_dll_of_interest);
 #endif
         }
         else if (((!wcsnicmp(our_commandline, L"c:\\windows\\system32\\rundll32.exe", 32) ||
@@ -1138,7 +1144,7 @@ BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)
 #endif
 
 		// obtain all protected pids
-        pipe2(pids, &length, "GETPIDS");
+        pipe2(pids, &length, "GETPIDS:");
         for (i = 0; i < length / sizeof(pids[0]); i++) {
             add_protected_pid(pids[i]);
         }

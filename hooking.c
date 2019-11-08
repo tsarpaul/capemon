@@ -88,6 +88,7 @@ static int set_caller_info(void *unused, ULONG_PTR addr)
             PTRACKEDREGION TrackedRegion = GetTrackedRegion((PVOID)addr);
             if (TrackedRegion) {
                 TrackedRegion->CanDump = 1;
+                DoOutputDebugString("set_caller_info: Caller at 0x%p in tracked regions.\n", addr);
                 ProcessTrackedRegions();
             }
 #endif

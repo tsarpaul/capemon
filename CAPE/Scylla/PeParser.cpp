@@ -1774,7 +1774,7 @@ bool PeParser::dumpProcess(DWORD_PTR modBase, DWORD_PTR entryPoint, const CHAR *
     getFileOverlay();
 
 #ifdef DEBUG_COMMENTS
-    DoOutputDebugString("dumpProcess DEBUG: Fixups complete, about to save to disk.\n");
+    DoOutputDebugString("dumpProcess: Fixups complete, about to save to %s.\n", dumpFilePath);
 #endif
     return savePeFileToDisk(dumpFilePath);
 }

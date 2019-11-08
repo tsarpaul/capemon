@@ -1817,12 +1817,6 @@ BOOL ContextSetNextAvailableBreakpoint
         return FALSE;
     }
 
-    if ((unsigned int)Register > 3 || (unsigned int)Register < 0)
-    {
-        DoOutputDebugString("ContextSetNextAvailableBreakpoint: Error - register value %d, can only have value 0-3.\n", Register);
-        return FALSE;
-    }
-
     CurrentThreadBreakpoint = GetThreadBreakpoints(GetCurrentThreadId());
 
     if (CurrentThreadBreakpoint == NULL)
@@ -1897,41 +1891,40 @@ BOOL ContextUpdateCurrentBreakpoint
 
     for (bp = 0; bp < NUMBER_OF_DEBUG_REGISTERS; bp++)
     {
-        if (Context->Dr6 & (DWORD_PTR)(1 << bp))
-        {
-            pBreakpointInfo = &(CurrentThreadBreakpoint->BreakpointInfo[bp]);
+        pBreakpointInfo = &(CurrentThreadBreakpoint->BreakpointInfo[bp]);
 
-            if (pBreakpointInfo == NULL)
+        if (pBreakpointInfo == NULL)
+        {
+            DoOutputDebugString("ContextUpdateCurrentBreakpoint: Can't get BreakpointInfo.\n");
+            return FALSE;
+        }
+
+        DoOutputDebugString("ContextUpdateCurrentBreakpoint: bp 0x%p: 0x%p 0x%p 0x%p 0x%p\n", pBreakpointInfo->Address, Context->Dr0, Context->Dr1, Context->Dr2, Context->Dr3);
+        if (pBreakpointInfo->Register == bp)
+        {
+            if (bp == 0 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr0) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE0))
             {
-                DoOutputDebugString("ContextUpdateCurrentBreakpoint: Can't get BreakpointInfo.\n");
-                return FALSE;
+                return ContextSetThreadBreakpoint(Context, 0, Size, Address, Type, Callback);
             }
 
-            if (pBreakpointInfo->Register == bp)
+            if (bp == 1 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr1) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE1))
             {
-                if (bp == 0 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr0) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE0))
-                {
-                    return ContextSetThreadBreakpoint(Context, 0, Size, Address, Type, Callback);
-                }
+                return ContextSetThreadBreakpoint(Context, 1, Size, Address, Type, Callback);
+            }
 
-                if (bp == 1 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr1) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE1))
-                {
-                    return ContextSetThreadBreakpoint(Context, 1, Size, Address, Type, Callback);
-                }
+            if (bp == 2 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr2) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE2))
+            {
+                return ContextSetThreadBreakpoint(Context, 2, Size, Address, Type, Callback);
+            }
 
-                if (bp == 2 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr2) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE2))
-                {
-                    return ContextSetThreadBreakpoint(Context, 2, Size, Address, Type, Callback);
-                }
-
-                if (bp == 3 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr3) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE3))
-                {
-                    return ContextSetThreadBreakpoint(Context, 3, Size, Address, Type, Callback);
-                }
+            if (bp == 3 && ((DWORD_PTR)pBreakpointInfo->Address == Context->Dr3) && ((DWORD)pBreakpointInfo->Type == ((PDR7)&(Context->Dr7))->RWE3))
+            {
+                return ContextSetThreadBreakpoint(Context, 3, Size, Address, Type, Callback);
             }
         }
     }
 
+    DoOutputDebugString("ContextUpdateCurrentBreakpoint: Exit function.\n");
     return FALSE;
 }
 
@@ -1950,7 +1943,7 @@ BOOL ContextClearCurrentBreakpoint
 
     if (CurrentThreadBreakpoint == NULL)
     {
-        DoOutputDebugString("ContextUpdateCurrentBreakpoint: Error - Failed to acquire thread breakpoints.\n");
+        DoOutputDebugString("ContextClearCurrentBreakpoint: Error - Failed to acquire thread breakpoints.\n");
         return FALSE;
     }
 
@@ -1962,7 +1955,7 @@ BOOL ContextClearCurrentBreakpoint
 
             if (pBreakpointInfo == NULL)
             {
-                DoOutputDebugString("ContextUpdateCurrentBreakpoint: Can't get BreakpointInfo.\n");
+                DoOutputDebugString("ContextClearCurrentBreakpoint: Can't get BreakpointInfo.\n");
                 return FALSE;
             }
 
