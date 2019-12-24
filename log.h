@@ -64,8 +64,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "hooking.h"
 
-void loq_none(int index, const char *category, const char *name,
-    int is_success, ULONG_PTR return_value, const char *fmt, ...);
+void loq_none(int index, const char *category, const char *name, int is_success, ULONG_PTR return_value, const char *fmt, ...);
 void loq(int index, const char *category, const char *name,
     int is_success, ULONG_PTR return_value, const char *fmt, ...);
 void log_new_process();
@@ -114,7 +113,7 @@ do { \
 
 #define LOQ_ntstatus(cat, fmt, ...) _LOQ(NT_SUCCESS(ret), cat, fmt, ##__VA_ARGS__)
 #define LOQ_nonnull(cat, fmt, ...) _LOQ(ret != NULL, cat, fmt, ##__VA_ARGS__)
-#define LOQ_handle(cat, fmt, ...) _LOQ(ret != NULL && ret != INVALID_HANDLE_VALUE, cat, fmt, ##__    VA_ARGS__)
+#define LOQ_handle(cat, fmt, ...) _LOQ(ret != NULL && ret != INVALID_HANDLE_VALUE, cat, fmt, ##__VA_ARGS__)
 #define LOQ_void(cat, fmt, ...) _LOQ(TRUE, cat, fmt, ##__VA_ARGS__)
 #define LOQ_bool(cat, fmt, ...) _LOQ(ret != FALSE, cat, fmt, ##__VA_ARGS__)
 #define LOQ_hresult(cat, fmt, ...) _LOQ(ret == S_OK, cat, fmt, ##__VA_ARGS__)
