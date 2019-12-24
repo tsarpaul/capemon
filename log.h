@@ -64,6 +64,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "hooking.h"
 
+void loq_none(int index, const char *category, const char *name,
+    int is_success, ULONG_PTR return_value, const char *fmt, ...);
 void loq(int index, const char *category, const char *name,
     int is_success, ULONG_PTR return_value, const char *fmt, ...);
 void log_new_process();
@@ -107,21 +109,21 @@ do { \
 	static volatile LONG _index; \
     if (_index == 0) \
 		InterlockedExchange(&_index, InterlockedIncrement(&g_log_index)); \
-	loq(_index, cat, &__FUNCTION__[4], eval, (ULONG_PTR)ret, fmt, ##__VA_ARGS__); \
+	loq_none(_index, cat, &__FUNCTION__[4], eval, (ULONG_PTR)ret, fmt, ##__VA_ARGS__); \
 } while (0)
 
-#define LOQ_ntstatus(cat, fmt, ...) do { } while(0)
-#define LOQ_nonnull(cat, fmt, ...) do { } while(0)
-#define LOQ_handle(cat, fmt, ...) do { } while(0)
-#define LOQ_void(cat, fmt, ...) do { } while(0)
-#define LOQ_bool(cat, fmt, ...) do { } while(0)
-#define LOQ_hresult(cat, fmt, ...) do { } while(0)
-#define LOQ_zero(cat, fmt, ...) do { } while(0)
-#define LOQ_nonzero(cat, fmt, ...) do { } while(0)
-#define LOQ_nonnegone(cat, fmt, ...) do { } while(0)
-#define LOQ_sockerr(cat, fmt, ...) do { } while(0)
-#define LOQ_sock(cat, fmt, ...) do { } while(0)
-#define LOQ_msgwait(cat, fmt, ...) do { } while(0)
+#define LOQ_ntstatus(cat, fmt, ...) _LOQ(NT_SUCCESS(ret), cat, fmt, ##__VA_ARGS__)
+#define LOQ_nonnull(cat, fmt, ...) _LOQ(ret != NULL, cat, fmt, ##__VA_ARGS__)
+#define LOQ_handle(cat, fmt, ...) _LOQ(ret != NULL && ret != INVALID_HANDLE_VALUE, cat, fmt, ##__    VA_ARGS__)
+#define LOQ_void(cat, fmt, ...) _LOQ(TRUE, cat, fmt, ##__VA_ARGS__)
+#define LOQ_bool(cat, fmt, ...) _LOQ(ret != FALSE, cat, fmt, ##__VA_ARGS__)
+#define LOQ_hresult(cat, fmt, ...) _LOQ(ret == S_OK, cat, fmt, ##__VA_ARGS__)
+#define LOQ_zero(cat, fmt, ...) _LOQ(ret == 0, cat, fmt, ##__VA_ARGS__)
+#define LOQ_nonzero(cat, fmt, ...) _LOQ(ret != 0, cat, fmt, ##__VA_ARGS__)
+#define LOQ_nonnegone(cat, fmt, ...) _LOQ(ret != -1, cat, fmt, ##__VA_ARGS__)
+#define LOQ_sockerr(cat, fmt, ...) _LOQ(ret != SOCKET_ERROR, cat, fmt, ##__VA_ARGS__)
+#define LOQ_sock(cat, fmt, ...) _LOQ(ret != INVALID_SOCKET, cat, fmt, ##__VA_ARGS__)
+#define LOQ_msgwait(cat, fmt, ...) _LOQ(ret != WAIT_FAILED, cat, fmt, ##__VA_ARGS__)
 
 #define ENSURE_LARGE_INTEGER(param) \
     LARGE_INTEGER _##param; _##param.QuadPart = 0; if(param == NULL) param = &_##param
